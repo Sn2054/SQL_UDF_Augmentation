@@ -38,7 +38,7 @@ class MscnConv(MessageAggregator):
                 graph.ndata['h'] = feat_dict
 
             # message passing
-            graph.multi_update_all({etype: (fn.copy_src('h', 'm'), fn.sum('m', 'ft')) for etype in etypes},
+            graph.multi_update_all({etype: (fn.copy_u('h', 'm'), fn.sum('m', 'ft')) for etype in etypes},
                                    cross_reducer='sum')
 
             feat = graph.ndata['h']

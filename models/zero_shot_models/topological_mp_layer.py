@@ -100,7 +100,7 @@ class TopologicalMPLayer(torch.nn.Module):
                     return nodes.data
 
                 # message passing
-                graph.send_and_recv(e_ids, fn.copy_src('h', 'm'), fn.sum('m', 'ft'),
+                graph.send_and_recv(e_ids, fn.copy_u('h', 'm'), fn.sum('m', 'ft'),
                                     apply_node_func=node_udf if PERFORM_MSG_AGGREGATION_IN_SEND_RECEIVE or WORK_ON_GRAPH_FEATS else None,
                                     etype=etype)
 
