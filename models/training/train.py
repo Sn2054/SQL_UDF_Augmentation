@@ -631,7 +631,7 @@ def train_model(workload_runs,
 
     configure_reproducibility(seed, deterministic=deterministic)
 
-    assert card_type in ['est', 'act', 'dd']
+    assert card_type in ['est', 'act', 'dd', 'wj']
 
     # create a dataset
     loss_class_name = final_mlp_kwargs['loss_class_name']
