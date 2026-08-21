@@ -52,7 +52,8 @@ if __name__ == '__main__':
     parser.add_argument('--work_with_udf_repr', default=False, action='store_true')
     #? These must match training when loading an augmented checkpoint.
     parser.add_argument('--augment', type=str2bool, default=argparse.SUPPRESS)
-    parser.add_argument('--augment_pooling', choices=['mean', 'sum', 'weighted_mean', 'attention'],
+    parser.add_argument('--test_augment', type=str2bool, default=argparse.SUPPRESS)
+    parser.add_argument('--augment_pooling', choices=['mean', 'sum', 'max', 'weighted_mean', 'attention', 'hybrid'],
                         default=argparse.SUPPRESS)
     parser.add_argument('--augment_refinement', choices=['residual_sum', 'gated_residual'],
                         default=argparse.SUPPRESS)
@@ -102,6 +103,8 @@ if __name__ == '__main__':
         args_config['work_with_udf_repr'] = args.work_with_udf_repr
     if hasattr(args, 'augment'):
         args_config['augment'] = args.augment
+    if hasattr(args, 'test_augment'):
+        args_config['test_augment'] = args.test_augment
     if hasattr(args, 'augment_pooling'):
         args_config['augment_pooling'] = args.augment_pooling
     if hasattr(args, 'augment_refinement'):
@@ -193,6 +196,7 @@ if __name__ == '__main__':
     early_stop_m = find_early_stopping_metric(metrics)
     best_model_state = early_stop_m.best_model
     model.load_state_dict(best_model_state)
+    model.set_augmentation_enabled(config['augment'] and config['test_augment'])
 
     # run inference for different udf filter selectivity assumptions
     preds_dict_pullup = defaultdict(dict)

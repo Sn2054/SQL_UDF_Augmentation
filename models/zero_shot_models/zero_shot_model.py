@@ -76,6 +76,7 @@ class ZeroShotModel(FcOutModel):
                 refine_ret=augment_refine_ret)
         else:
             self.graph_augmentor = None
+        self.augmentation_enabled = self.graph_augmentor is not None
 
         # these message passing steps are performed in the beginning (dependent on the concrete database system at hand)
         self.prepasses = prepasses
@@ -94,6 +95,12 @@ class ZeroShotModel(FcOutModel):
         if self.graph_augmentor is None:
             return None
         return self.graph_augmentor.last_coarse_fine_loss
+
+    def set_augmentation_enabled(self, enabled: bool) -> None:
+        """Enable or disable augmentation at runtime without changing checkpoint structure."""
+        self.augmentation_enabled = bool(enabled) and self.graph_augmentor is not None
+        if not self.augmentation_enabled and self.graph_augmentor is not None:
+            self.graph_augmentor.last_coarse_fine_loss = None
 
     def encode_node_types(self, g, features):
         """
@@ -263,7 +270,7 @@ class ZeroShotModel(FcOutModel):
             # all to udf passes
             apply_mp_directions(pre_pass_directions)
             #? Optional semantic graph augmentation runs after column-to-UDF context and before standard UDF MP.
-            if self.graph_augmentor is not None:
+            if self.graph_augmentor is not None and self.augmentation_enabled:
                 feat_dict = self.graph_augmentor(g, feat_dict)
             # mp in udf
             if not self.mp_ignore_udf and not self.plans_have_no_udf:

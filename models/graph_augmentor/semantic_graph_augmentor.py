@@ -20,7 +20,7 @@ class SemanticGraphAugmentor(nn.Module):
             include_inv: bool = False,
             refine_ret: bool = True):
         super().__init__()
-        valid_pooling = {"mean", "sum", "weighted_mean", "attention"}
+        valid_pooling = {"mean", "sum", "max", "weighted_mean", "attention", "hybrid"}
         valid_refinement = {"residual_sum", "gated_residual"}
         if pooling not in valid_pooling:
             raise ValueError(f"Unknown augment pooling {pooling}. Expected one of {sorted(valid_pooling)}")
@@ -35,6 +35,10 @@ class SemanticGraphAugmentor(nn.Module):
         self.refine_ret = refine_ret
 
         self.attention_score = nn.Linear(hidden_dim, 1)
+        if pooling == "hybrid":
+            # Preserve both the region-wide signal and its strongest activations,
+            # then restore the hidden size expected by downstream layers.
+            self.hybrid_projection = nn.Linear(hidden_dim * 2, hidden_dim)
         self.coarse_update = nn.Sequential(
             nn.Linear(hidden_dim * 2, hidden_dim),
             nn.LeakyReLU(inplace=True),
@@ -133,6 +137,8 @@ class SemanticGraphAugmentor(nn.Module):
             return stacked.mean(dim=0)
         if self.pooling == "sum":
             return stacked.sum(dim=0)
+        if self.pooling == "max":
+            return stacked.max(dim=0).values
         if self.pooling == "weighted_mean":
             safe_weights = torch.clamp(weights, min=1.0)
             return (stacked * safe_weights).sum(dim=0) / safe_weights.sum(dim=0).clamp(min=1.0)
@@ -140,6 +146,10 @@ class SemanticGraphAugmentor(nn.Module):
             scores = self.attention_score(stacked)
             attn = torch.softmax(scores, dim=0)
             return (stacked * attn).sum(dim=0)
+        if self.pooling == "hybrid":
+            mean_pooled = stacked.mean(dim=0)
+            max_pooled = stacked.max(dim=0).values
+            return self.hybrid_projection(torch.cat([mean_pooled, max_pooled], dim=-1))
         raise ValueError(f"Unknown augment pooling {self.pooling}")
 
     def _coarse_message_passing(self, region_embeddings: torch.Tensor, region_members) -> torch.Tensor:

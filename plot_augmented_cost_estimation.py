@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Plot baseline versus augmented validation q-error means for one test database."""
+"""Plot baseline versus augmented pull-up and pushdown q-error means."""
 
 from __future__ import annotations
 
@@ -24,6 +24,7 @@ from summarize_repeated_runs import aggregate, read_workbooks
 
 
 METRICS = ("q50", "q95", "q99")
+WORKLOADS = (("pullup", "Pull-up"), ("pushdown", "Pushdown"))
 
 
 def parse_args() -> argparse.Namespace:
@@ -37,6 +38,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--output-dir", required=True)
     parser.add_argument("--seed", required=True)
     parser.add_argument("--augment", required=True)
+    parser.add_argument("--test-augment", required=True)
     parser.add_argument("--augment-pooling", required=True)
     parser.add_argument("--augment-refinement", required=True)
     parser.add_argument("--augment-coarse-layers", required=True)
@@ -56,7 +58,19 @@ def as_float(value: object) -> Optional[float]:
     return number if math.isfinite(number) else None
 
 
-def read_baseline(path: Path, test_db: str, cardinality: str) -> Optional[Dict[str, Optional[float]]]:
+def workload_kind(workload: object) -> Optional[str]:
+    name = str(workload or "").casefold()
+    if "pullup" in name:
+        return "pullup"
+    if "pushdown" in name:
+        return "pushdown"
+    return None
+
+
+def read_baseline_workloads(
+        path: Path,
+        test_db: str,
+        cardinality: str) -> Optional[Dict[str, Dict[str, Optional[float]]]]:
     if not path.exists():
         return None
     workbook = load_workbook(path, read_only=True, data_only=True)
@@ -67,7 +81,11 @@ def read_baseline(path: Path, test_db: str, cardinality: str) -> Optional[Dict[s
         workbook.close()
         return None
     header_index = {str(header): index for index, header in enumerate(headers) if header is not None}
-    required = {"test_db", "cardinality_type", "q50_mean", "q95_mean", "q99_mean"}
+    required = {
+        "test_db", "cardinality_type",
+        *(f"pull_up_{metric}_mean" for metric in METRICS),
+        *(f"push_down_{metric}_mean" for metric in METRICS),
+    }
     if not required.issubset(header_index):
         workbook.close()
         return None
@@ -78,23 +96,36 @@ def read_baseline(path: Path, test_db: str, cardinality: str) -> Optional[Dict[s
         row_cardinality = str(row[header_index["cardinality_type"]] or "")
         if database.casefold() == test_db.casefold() and row_cardinality.casefold() == cardinality.casefold():
             result = {
-                metric: as_float(row[header_index[f"{metric}_mean"]])
-                for metric in METRICS
+                "pullup": {
+                    metric: as_float(row[header_index[f"pull_up_{metric}_mean"]])
+                    for metric in METRICS
+                },
+                "pushdown": {
+                    metric: as_float(row[header_index[f"push_down_{metric}_mean"]])
+                    for metric in METRICS
+                },
             }
             break
     workbook.close()
     return result
 
 
-def aggregate_augmented(args: argparse.Namespace) -> Optional[Dict[str, Optional[float]]]:
+def aggregate_augmented_workloads(
+        args: argparse.Namespace) -> Optional[Dict[str, Dict[str, Optional[float]]]]:
     rows, run_details = read_workbooks(args.summary_xlsx)
     summary = aggregate(rows, args.requested_runs, run_details)
     if summary["successful_runs"] == 0:
         return None
-    return {
-        metric: summary["validation"].get(metric, (None, None, 0))[0]
-        for metric in METRICS
-    }
+    result = {}
+    for workload, metrics in summary["workloads"].items():
+        kind = workload_kind(workload)
+        if kind is None:
+            continue
+        result[kind] = {
+            metric: metrics.get(metric, (None, None, 0))[0]
+            for metric in METRICS
+        }
+    return result if result else None
 
 
 def bar_values(values: Dict[str, Optional[float]]):
@@ -127,62 +158,9 @@ def safe_filename_part(value: str) -> str:
     return re.sub(r"[^A-Za-z0-9_.-]+", "-", value).strip("-_") or "unknown"
 
 
-def create_plot(
-        baseline: Dict[str, Optional[float]],
-        augmented: Dict[str, Optional[float]],
-        args: argparse.Namespace) -> Path:
-    metric_labels = [metric.upper() for metric in METRICS]
-    x = np.arange(len(metric_labels))
-    bar_width = 0.32
-    baseline_values = bar_values(baseline)
-    augmented_values = bar_values(augmented)
-
-    figure, axis = plt.subplots(figsize=(11, 7))
-    baseline_bars = axis.bar(
-        x - bar_width / 2,
-        baseline_values,
-        width=bar_width,
-        label="Baseline",
-        color="#4C78A8",
-        edgecolor="black",
-        linewidth=0.5,
-    )
-    augmented_bars = axis.bar(
-        x + bar_width / 2,
-        augmented_values,
-        width=bar_width,
-        label="Augmentation",
-        color="#F58518",
-        edgecolor="black",
-        linewidth=0.5,
-    )
-    label_bars(axis, baseline_bars, baseline_values)
-    label_bars(axis, augmented_bars, augmented_values)
-
-    finite_values = [
-        value
-        for value in baseline_values + augmented_values
-        if not np.isnan(value)
-    ]
-    maximum = max(finite_values, default=1.0)
-    axis.set_ylim(0, maximum * 1.18 if maximum > 0 else 1.0)
-    axis.set_xticks(x)
-    axis.set_xticklabels(metric_labels, fontsize=11)
-    axis.set_xlim(-0.5, len(metric_labels) - 0.5)
-    axis.set_ylabel("Q-error", fontsize=11)
-    axis.grid(axis="y", linestyle="--", alpha=0.3)
-    axis.set_axisbelow(True)
-    axis.legend(loc="upper left", frameon=False, ncol=2)
-    figure.suptitle(
-        "Baseline vs Augmentation Q-error\n"
-        f"Test DB: {args.test_db} | Cardinality: {args.cardinality}",
-        fontsize=17,
-        fontweight="bold",
-        y=0.98,
-    )
-
-    settings = (
-        f"SEED={args.seed} | AUGMENT={args.augment} | "
+def format_settings(args: argparse.Namespace) -> str:
+    return (
+        f"SEED={args.seed} | AUGMENT={args.augment} | TEST_AUGMENT={args.test_augment} | "
         f"AUGMENT_POOLING={args.augment_pooling} | "
         f"AUGMENT_REFINEMENT={args.augment_refinement}\n"
         f"AUGMENT_COARSE_LAYERS={args.augment_coarse_layers} | "
@@ -190,16 +168,75 @@ def create_plot(
         f"AUGMENT_REFINE_RET={args.augment_refine_ret} | "
         f"LAMBDA_STRUCT={args.lambda_struct}"
     )
+
+
+def create_plot(
+        baseline: Dict[str, Dict[str, Optional[float]]],
+        augmented: Dict[str, Dict[str, Optional[float]]],
+        args: argparse.Namespace) -> Path:
+    metric_labels = [metric.upper() for metric in METRICS]
+    x = np.arange(len(metric_labels))
+    bar_width = 0.32
+
+    figure, axes = plt.subplots(1, len(WORKLOADS), figsize=(15, 7))
+    for axis, (workload, title) in zip(axes, WORKLOADS):
+        baseline_values = bar_values(baseline[workload])
+        augmented_values = bar_values(augmented[workload])
+        baseline_bars = axis.bar(
+            x - bar_width / 2,
+            baseline_values,
+            width=bar_width,
+            label="Baseline",
+            color="#4C78A8",
+            edgecolor="black",
+            linewidth=0.5,
+        )
+        augmented_bars = axis.bar(
+            x + bar_width / 2,
+            augmented_values,
+            width=bar_width,
+            label="Augmentation",
+            color="#F58518",
+            edgecolor="black",
+            linewidth=0.5,
+        )
+        label_bars(axis, baseline_bars, baseline_values)
+        label_bars(axis, augmented_bars, augmented_values)
+
+        finite_values = [
+            value
+            for value in baseline_values + augmented_values
+            if not np.isnan(value)
+        ]
+        maximum = max(finite_values, default=1.0)
+        axis.set_ylim(0, maximum * 1.18 if maximum > 0 else 1.0)
+        axis.set_xticks(x)
+        axis.set_xticklabels(metric_labels, fontsize=11)
+        axis.set_xlim(-0.5, len(metric_labels) - 0.5)
+        axis.set_title(title, fontsize=15, fontweight="bold")
+        axis.set_ylabel("Q-error", fontsize=11)
+        axis.grid(axis="y", linestyle="--", alpha=0.3)
+        axis.set_axisbelow(True)
+    axes[0].legend(loc="upper left", frameon=False, ncol=2)
+    figure.suptitle(
+        "Baseline vs Augmentation Q-error"
+        f" — Test DB: {args.test_db} | Cardinality: {args.cardinality}",
+        fontsize=17,
+        fontweight="bold",
+        y=0.98,
+    )
+
+    settings = format_settings(args)
     figure.text(
         0.5,
-        0.80,
+        0.88,
         settings,
         ha="center",
         va="center",
         fontsize=12,
         linespacing=1.5,
     )
-    figure.tight_layout(rect=[0, 0, 1, 0.76])
+    figure.tight_layout(rect=[0, 0, 1, 0.80])
 
     output_dir = Path(args.output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
@@ -213,16 +250,24 @@ def create_plot(
 
 def main() -> int:
     args = parse_args()
-    baseline = read_baseline(Path(args.baseline_xlsx), args.test_db, args.cardinality)
+    baseline = read_baseline_workloads(Path(args.baseline_xlsx), args.test_db, args.cardinality)
     if baseline is None:
         print(
-            "Augmented plot skipped: no baseline row for "
+            "Augmented plot skipped: no baseline workload rows for "
             f"({args.test_db}, {args.cardinality}) in {args.baseline_xlsx}"
         )
         return 0
-    augmented = aggregate_augmented(args)
+    augmented = aggregate_augmented_workloads(args)
     if augmented is None:
         print("Augmented plot skipped: no successful augmented runs were found.")
+        return 0
+    missing = [
+        title
+        for workload, title in WORKLOADS
+        if workload not in baseline or workload not in augmented
+    ]
+    if missing:
+        print("Augmented plot skipped: missing workload result(s): " + ", ".join(missing))
         return 0
     output_path = create_plot(baseline, augmented, args)
     print(f"Augmented plot: {output_path}")

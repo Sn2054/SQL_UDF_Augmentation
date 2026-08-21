@@ -141,6 +141,7 @@ def get_config(hyperparams: Dict[str, Any], wl_base_path: str, assemble_filename
         udf_only_pretrained_model_artifact_dir=None,
         udf_only_pretrained_model_filename=None,
         augment=False,
+        test_augment=True,
         augment_pooling='attention',
         augment_refinement='gated_residual',
         augment_coarse_layers=1,
@@ -371,6 +372,10 @@ def get_config(hyperparams: Dict[str, Any], wl_base_path: str, assemble_filename
         config['augment'] = hyperparams.pop('augment')
         if config['augment']:
             model_name = f'aug_{model_name}'
+    if 'test_augment' in hyperparams:
+        config['test_augment'] = hyperparams.pop('test_augment')
+        if config['augment'] and not config['test_augment']:
+            model_name += '_augnoTEST'
     if 'augment_pooling' in hyperparams:
         config['augment_pooling'] = hyperparams.pop('augment_pooling')
         if config['augment']:

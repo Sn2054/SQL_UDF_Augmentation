@@ -266,6 +266,7 @@ def collect_summary(lines: List[str], args: argparse.Namespace) -> Dict[str, obj
         "include_pullup_data": config.get("include_pullup_data", hyperparams.get("include_pullup_data", "-")),
         "include_pushdown_data": config.get("include_pushdown_data", hyperparams.get("include_pushdown_data", "-")),
         "augment": config.get("augment", hyperparams.get("augment", "-")),
+        "test_augment": config.get("test_augment", hyperparams.get("test_augment", "-")),
         "augment_pooling": config.get("augment_pooling", hyperparams.get("augment_pooling", "-")),
         "augment_refinement": config.get("augment_refinement", hyperparams.get("augment_refinement", "-")),
         "augment_coarse_layers": config.get("augment_coarse_layers", hyperparams.get("augment_coarse_layers", "-")),
@@ -313,6 +314,7 @@ def print_summary(summary: Dict[str, object], args: argparse.Namespace) -> None:
     print(
         "Augmentation: "
         f"augment={summary['augment']}, "
+        f"test_augment={summary['test_augment']}, "
         f"pooling={summary['augment_pooling']}, "
         f"refinement={summary['augment_refinement']}, "
         f"coarse_layers={summary['augment_coarse_layers']}, "
@@ -464,6 +466,7 @@ def write_xlsx_summary(summary: Dict[str, object], args: argparse.Namespace) -> 
         "include_pullup_data",
         "include_pushdown_data",
         "augment",
+        "test_augment",
         "augment_pooling",
         "augment_refinement",
         "augment_coarse_layers",
@@ -523,6 +526,7 @@ def write_xlsx_summary(summary: Dict[str, object], args: argparse.Namespace) -> 
         "include_pullup_data": summary["include_pullup_data"],
         "include_pushdown_data": summary["include_pushdown_data"],
         "augment": summary["augment"],
+        "test_augment": summary["test_augment"],
         "augment_pooling": summary["augment_pooling"],
         "augment_refinement": summary["augment_refinement"],
         "augment_coarse_layers": summary["augment_coarse_layers"],

@@ -35,11 +35,13 @@ MODELS_OUT="$SCRIPT_DIR/saved/models"
 LOG_DIR="$SCRIPT_DIR/saved/training_logs"
 SUMMARY_DIR="$SCRIPT_DIR/saved/summary_xlsx"
 BASELINE_RESULTS_XLSX="$SCRIPT_DIR/results/baseline_cost_estimation.xlsx"
+AUGMENTED_RESULTS_XLSX="$SCRIPT_DIR/results/augmented_cost_estimation.xlsx"
 AUGMENTED_PLOT_DIR="$SCRIPT_DIR/results/augmented_plots"
 
 SUMMARY_SCRIPT="$SCRIPT_DIR/summarize_training_log.py"
 REPEAT_SUMMARY_SCRIPT="$SCRIPT_DIR/summarize_repeated_runs.py"
 BASELINE_RESULTS_SCRIPT="$SCRIPT_DIR/update_baseline_cost_estimation.py"
+AUGMENTED_RESULTS_SCRIPT="$SCRIPT_DIR/update_augmented_cost_estimation.py"
 AUGMENTED_PLOT_SCRIPT="$SCRIPT_DIR/plot_augmented_cost_estimation.py"
 
 # =============================================================================
@@ -75,15 +77,16 @@ TEST_ALL_CARDINALITY=False   #? False: selected type only; True: est, act, dd, a
 NUM_WORKERS=8
 INCLUDE_PULLUP_DATA=True
 INCLUDE_PUSHDOWN_DATA=True
-EPOCHS=50 #100
-BATCH_SIZE= 512
+EPOCHS=1
+BATCH_SIZE=512
 
 # =============================================================================
 # 6. Semantic graph augmentation
 # =============================================================================
 
-AUGMENT=False                          #? True, False
-AUGMENT_POOLING="attention"           #? mean, sum, weighted_mean, attention
+AUGMENT=True                          #? True, False
+TEST_AUGMENT=True                     #? Effective only when AUGMENT=True; False disables augmentation for held-out testing.
+AUGMENT_POOLING="hybrid"           #? mean, sum, max, weighted_mean, attention, hybrid
 AUGMENT_REFINEMENT="gated_residual"   #? residual_sum, gated_residual
 AUGMENT_COARSE_LAYERS=1               #? 0, 1, 2, ... (run 1 round of message passing between the coarse/region nodes created by the augmentation.)
 AUGMENT_INCLUDE_INV=False             #? True, False
@@ -151,6 +154,7 @@ COMMON_ARGS+=(
     --batch_size "$BATCH_SIZE"
 
     --augment "$AUGMENT"
+    --test_augment "$TEST_AUGMENT"
     --augment_pooling "$AUGMENT_POOLING"
     --augment_refinement "$AUGMENT_REFINEMENT"
     --augment_coarse_layers "$AUGMENT_COARSE_LAYERS"
@@ -195,6 +199,7 @@ append_summary() {
             --run-variable "EPOCHS=$EPOCHS" \
             --run-variable "BATCH_SIZE=$BATCH_SIZE" \
             --run-variable "AUGMENT=$AUGMENT" \
+            --run-variable "TEST_AUGMENT=$TEST_AUGMENT" \
             --run-variable "AUGMENT_POOLING=$AUGMENT_POOLING" \
             --run-variable "AUGMENT_REFINEMENT=$AUGMENT_REFINEMENT" \
             --run-variable "AUGMENT_COARSE_LAYERS=$AUGMENT_COARSE_LAYERS" \
@@ -256,6 +261,7 @@ for ((run_index = 1; run_index <= N_RUNS; run_index++)); do
     echo "Batch size: $BATCH_SIZE" | tee_log
 
     echo "Augment: $AUGMENT" | tee_log
+    echo "Test augment: $TEST_AUGMENT" | tee_log
     echo "Augment pooling: $AUGMENT_POOLING" | tee_log
     echo "Augment refinement: $AUGMENT_REFINEMENT" | tee_log
     echo "Augment coarse layers: $AUGMENT_COARSE_LAYERS" | tee_log
@@ -306,6 +312,7 @@ if [[ "${AUGMENT,,}" == "false" ]]; then
             --test-db "$TEST_DB" \
             --cardinality-type "$CARDINALITY_TYPE" \
             --time-stamp "$GROUP_RUN_TIME" \
+            --epochs "$EPOCHS" \
             --output-xlsx "$BASELINE_RESULTS_XLSX" \
             "${RUN_XLSXS[@]}"
         baseline_exit_code="$?"
@@ -320,6 +327,34 @@ if [[ "${AUGMENT,,}" == "false" ]]; then
 fi
 
 if [[ "${AUGMENT,,}" == "true" ]]; then
+    if [[ -f "$AUGMENTED_RESULTS_SCRIPT" ]]; then
+        set +e
+        python "$AUGMENTED_RESULTS_SCRIPT" \
+            --requested-runs "$N_RUNS" \
+            --test-db "$TEST_DB" \
+            --cardinality-type "$CARDINALITY_TYPE" \
+            --time-stamp "$GROUP_RUN_TIME" \
+            --epochs "$EPOCHS" \
+            --baseline-xlsx "$BASELINE_RESULTS_XLSX" \
+            --output-xlsx "$AUGMENTED_RESULTS_XLSX" \
+            --test-augment "$TEST_AUGMENT" \
+            --augment-pooling "$AUGMENT_POOLING" \
+            --augment-refinement "$AUGMENT_REFINEMENT" \
+            --augment-coarse-layers "$AUGMENT_COARSE_LAYERS" \
+            --augment-include-inv "$AUGMENT_INCLUDE_INV" \
+            --augment-refine-ret "$AUGMENT_REFINE_RET" \
+            --lambda-struct "$LAMBDA_STRUCT" \
+            "${RUN_XLSXS[@]}"
+        augmented_results_exit_code="$?"
+        set -e
+        if [[ "$augmented_results_exit_code" -ne 0 && "$overall_exit_code" -eq 0 ]]; then
+            overall_exit_code="$augmented_results_exit_code"
+        fi
+    else
+        echo "Augmented results script missing: $AUGMENTED_RESULTS_SCRIPT" >&2
+        overall_exit_code=1
+    fi
+
     if [[ -f "$BASELINE_RESULTS_XLSX" && -f "$AUGMENTED_PLOT_SCRIPT" ]]; then
         set +e
         python "$AUGMENTED_PLOT_SCRIPT" \
@@ -331,6 +366,7 @@ if [[ "${AUGMENT,,}" == "true" ]]; then
             --output-dir "$AUGMENTED_PLOT_DIR" \
             --seed "$SEED" \
             --augment "$AUGMENT" \
+            --test-augment "$TEST_AUGMENT" \
             --augment-pooling "$AUGMENT_POOLING" \
             --augment-refinement "$AUGMENT_REFINEMENT" \
             --augment-coarse-layers "$AUGMENT_COARSE_LAYERS" \

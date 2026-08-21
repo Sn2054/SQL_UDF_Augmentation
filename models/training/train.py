@@ -616,6 +616,7 @@ def train_model(workload_runs,
                 udf_only_pretrained_model_artifact_dir: str = None,
                 udf_only_pretrained_model_filename: str = None,
                 augment: bool = False,
+                test_augment: bool = True,
                 augment_pooling: str = "attention",
                 augment_refinement: str = "gated_residual",
                 augment_coarse_layers: int = 1,
@@ -870,6 +871,17 @@ def train_model(workload_runs,
                                                          save_path=artifacts_out_path,
                                                          query_stats=train_query_stats)
                     wandb.log(train_udf_pca)
+
+            # Training and validation use augmentation whenever AUGMENT is enabled. Only the
+            # held-out workload evaluation is controlled by TEST_AUGMENT.
+            effective_test_augment = bool(augment and test_augment)
+            if hasattr(model, 'set_augmentation_enabled'):
+                model.set_augmentation_enabled(effective_test_augment)
+            if udf_model is not None and hasattr(udf_model, 'set_augmentation_enabled'):
+                udf_model.set_augmentation_enabled(effective_test_augment)
+            print(
+                f"Test augmentation: requested={test_augment}, effective={effective_test_augment}",
+                flush=True)
 
             test_cardinalities = ['est', 'act', 'dd', 'wj'] if test_all_cardinality else [card_type]
             print(f"Test cardinalities: {', '.join(test_cardinalities)}", flush=True)

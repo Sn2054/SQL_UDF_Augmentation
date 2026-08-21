@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Upsert baseline validation q-error means into the shared results workbook."""
+"""Upsert baseline pull-up and pushdown q-error means into the shared results workbook."""
 
 from __future__ import annotations
 
@@ -13,7 +13,15 @@ from openpyxl.styles import Font
 from summarize_repeated_runs import aggregate, read_workbooks
 
 
-HEADERS = ["test_db", "cardinality_type", "q50_mean", "q95_mean", "q99_mean", "time_stamp"]
+METRICS = ("q50", "q95", "q99")
+WORKLOAD_PREFIXES = (("pullup", "pull_up"), ("pushdown", "push_down"))
+HEADERS = [
+    "test_db",
+    "cardinality_type",
+    *(f"{prefix}_{metric}_mean" for _, prefix in WORKLOAD_PREFIXES for metric in METRICS),
+    "time_stamp",
+    "epochs",
+]
 
 
 def parse_args() -> argparse.Namespace:
@@ -23,13 +31,36 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--test-db", required=True)
     parser.add_argument("--cardinality-type", required=True)
     parser.add_argument("--time-stamp", required=True)
+    parser.add_argument("--epochs", type=int, required=True)
     parser.add_argument("--output-xlsx", required=True)
     return parser.parse_args()
 
 
-def metric_mean(summary: Dict[str, object], metric: str) -> Optional[float]:
-    mean, _, _ = summary["validation"].get(metric, (None, None, 0))
-    return mean
+def workload_kind(workload: object) -> Optional[str]:
+    name = str(workload or "").casefold()
+    for kind, _ in WORKLOAD_PREFIXES:
+        if kind in name:
+            return kind
+    return None
+
+
+def build_values(args: argparse.Namespace, summary: Dict[str, object]) -> Dict[str, object]:
+    values = {
+        "test_db": args.test_db,
+        "cardinality_type": args.cardinality_type,
+        "time_stamp": args.time_stamp,
+        "epochs": args.epochs,
+    }
+    workload_metrics = {}
+    for workload, metrics in summary["workloads"].items():
+        kind = workload_kind(workload)
+        if kind is not None:
+            workload_metrics[kind] = metrics
+    for kind, prefix in WORKLOAD_PREFIXES:
+        metrics = workload_metrics.get(kind, {})
+        for metric in METRICS:
+            values[f"{prefix}_{metric}_mean"] = metrics.get(metric, (None, None, 0))[0]
+    return values
 
 
 def read_existing_results(worksheet):
@@ -58,6 +89,8 @@ def upsert_result(path: str, values: Dict[str, object]) -> None:
         workbook = load_workbook(path)
         worksheet = workbook["Baseline"] if "Baseline" in workbook.sheetnames else workbook.active
         worksheet.title = "Baseline"
+        if "BaselineWorkloads" in workbook.sheetnames:
+            workbook.remove(workbook["BaselineWorkloads"])
     else:
         workbook = Workbook()
         worksheet = workbook.active
@@ -102,14 +135,15 @@ def main() -> int:
         print("Baseline result not updated: no successful runs were found.")
         return 1
 
-    values = {
-        "test_db": args.test_db,
-        "cardinality_type": args.cardinality_type,
-        "q50_mean": metric_mean(summary, "q50"),
-        "q95_mean": metric_mean(summary, "q95"),
-        "q99_mean": metric_mean(summary, "q99"),
-        "time_stamp": args.time_stamp,
-    }
+    values = build_values(args, summary)
+    missing_metrics = [
+        header for header in HEADERS
+        if (header.startswith("pull_up_") or header.startswith("push_down_"))
+        and values.get(header) is None
+    ]
+    if missing_metrics:
+        print("Baseline result not updated: missing workload mean(s): " + ", ".join(missing_metrics))
+        return 1
     upsert_result(args.output_xlsx, values)
     print(f"Baseline result updated: {args.output_xlsx} ({args.test_db}, {args.cardinality_type})")
     return 0

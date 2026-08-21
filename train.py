@@ -205,7 +205,8 @@ if __name__ == '__main__':
 
     #? Semantic graph augmentation controls are disabled by default for base GRACEFUL compatibility.
     parser.add_argument('--augment', type=str2bool, default=argparse.SUPPRESS)
-    parser.add_argument('--augment_pooling', choices=['mean', 'sum', 'weighted_mean', 'attention'],
+    parser.add_argument('--test_augment', type=str2bool, default=argparse.SUPPRESS)
+    parser.add_argument('--augment_pooling', choices=['mean', 'sum', 'max', 'weighted_mean', 'attention', 'hybrid'],
                         default=argparse.SUPPRESS)
     parser.add_argument('--augment_refinement', choices=['residual_sum', 'gated_residual'],
                         default=argparse.SUPPRESS)
@@ -323,6 +324,8 @@ if __name__ == '__main__':
         args_config['flat_vector_model_path'] = args.flat_vector_model_path
     if hasattr(args, 'augment'):
         args_config['augment'] = args.augment
+    if hasattr(args, 'test_augment'):
+        args_config['test_augment'] = args.test_augment
     if hasattr(args, 'augment_pooling'):
         args_config['augment_pooling'] = args.augment_pooling
     if hasattr(args, 'augment_refinement'):
