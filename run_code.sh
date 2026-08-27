@@ -50,7 +50,7 @@ AUGMENTED_PLOT_SCRIPT="$SCRIPT_DIR/plot_augmented_cost_estimation.py"
 
 N_RUNS=1                 #? Number of sequential repetitions; all repetitions use SEED below.
 SEED=42 
-DEVICE=0
+DEVICE=1
 CUDA_DEVICE="cuda:${DEVICE}"  #? Any integer, e.g. 0, 1, 2, 42.
 DETERMINISTIC=True       #? True, False
 
@@ -66,8 +66,8 @@ DATABASE="duckdb"
 # 4. Held-out evaluation
 # =============================================================================
 
-TEST_DB="accidents"
-CARDINALITY_TYPE="est"       #? est, act, dd, wj
+TEST_DB="airline"
+CARDINALITY_TYPE="act"       #? est, act, dd, wj
 TEST_ALL_CARDINALITY=False   #? False: selected type only; True: est, act, dd, and wj.
 
 # =============================================================================
@@ -77,7 +77,7 @@ TEST_ALL_CARDINALITY=False   #? False: selected type only; True: est, act, dd, a
 NUM_WORKERS=8
 INCLUDE_PULLUP_DATA=True
 INCLUDE_PUSHDOWN_DATA=True
-EPOCHS=1
+EPOCHS=100
 BATCH_SIZE=512
 
 # =============================================================================
@@ -91,7 +91,7 @@ AUGMENT_REFINEMENT="gated_residual"   #? residual_sum, gated_residual
 AUGMENT_COARSE_LAYERS=1               #? 0, 1, 2, ... (run 1 round of message passing between the coarse/region nodes created by the augmentation.)
 AUGMENT_INCLUDE_INV=False             #? True, False
 AUGMENT_REFINE_RET=False              #? True, False
-LAMBDA_STRUCT=0                       #? 0.0, 0.001, 0.01, 0.05, 0.1 (total_loss = runtime_loss + LAMBDA_STRUCT * coarse_fine_loss)
+LAMBDA_STRUCT=0.1                       #? 0.0, 0.001, 0.01, 0.05, 0.1 (total_loss = runtime_loss + LAMBDA_STRUCT * coarse_fine_loss)
 
 # =============================================================================
 # 7. Values derived for this execution

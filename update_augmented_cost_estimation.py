@@ -177,9 +177,9 @@ def normalized(value: object) -> str:
 
 
 def same_configuration(left: Dict[str, object], right: Dict[str, object]) -> bool:
-    key_headers = ("test_db", "cardinality_type", *CONFIG_HEADERS)
+    key_headers = ("test_db", "cardinality_type", "epochs", *CONFIG_HEADERS)
     for header in key_headers:
-        if header in {"augment-coarse-layers", "lambda-struct"}:
+        if header in {"epochs", "augment-coarse-layers", "lambda-struct"}:
             if as_float(left.get(header)) != as_float(right.get(header)):
                 return False
         elif header == "test-augment":
