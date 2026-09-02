@@ -51,7 +51,7 @@ AUGMENTED_PLOT_SCRIPT="$SCRIPT_DIR/plot_augmented_cost_estimation.py"
 N_RUNS=1                 #? Number of sequential repetitions; all repetitions use SEED below.
 SEED=42 
 DEVICE="${DEVICE:-0}"
-CUDA_DEVICE="cuda:${DEVICE:-0}"  #? Any integer, e.g. 0, 1, 2, 42.
+CUDA_DEVICE="cuda:${DEVICE}"  #? Any integer, e.g. 0, 1, 2, 42.
 DETERMINISTIC=True       #? True, False
 
 # =============================================================================

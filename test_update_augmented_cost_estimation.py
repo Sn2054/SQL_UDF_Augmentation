@@ -37,6 +37,7 @@ class UpdateAugmentedCostEstimationTest(unittest.TestCase):
         current = {
             "test_db": "accidents",
             "cardinality_type": "est",
+            "epochs": 100,
             "test-augment": "True",
             "augment-pooling": "hybrid",
             "augment-refinement": "gated_residual",
@@ -116,12 +117,14 @@ class UpdateAugmentedCostEstimationTest(unittest.TestCase):
                 "pushdown": {"q50": 5.0, "q95": 8.0, "q99": 11.0},
             }
             first = build_values(arguments(), summary, baseline)
-            replacement = build_values(arguments(time_stamp="20260820_130000", epochs=200), summary, baseline)
+            replacement = build_values(arguments(time_stamp="20260820_130000"), summary, baseline)
+            distinct_epochs = build_values(arguments(epochs=200), summary, baseline)
             distinct = build_values(arguments(augment_pooling="max"), summary, baseline)
             no_test_augment = build_values(arguments(test_augment="False"), summary, baseline)
 
             upsert_result(str(path), first)
             upsert_result(str(path), replacement)
+            upsert_result(str(path), distinct_epochs)
             upsert_result(str(path), distinct)
             upsert_result(str(path), no_test_augment)
 
@@ -130,11 +133,12 @@ class UpdateAugmentedCostEstimationTest(unittest.TestCase):
             rows = list(worksheet.iter_rows(values_only=True))
             workbook.close()
             self.assertEqual(list(rows[0]), HEADERS)
-            self.assertEqual(len(rows), 4)
+            self.assertEqual(len(rows), 5)
             self.assertEqual(rows[1][HEADERS.index("time_stamp")], "20260820_130000")
-            self.assertEqual(rows[1][HEADERS.index("epochs")], 200)
-            self.assertEqual(rows[2][HEADERS.index("augment-pooling")], "max")
-            self.assertEqual(rows[3][HEADERS.index("test-augment")], "False")
+            self.assertEqual(rows[1][HEADERS.index("epochs")], 100)
+            self.assertEqual(rows[2][HEADERS.index("epochs")], 200)
+            self.assertEqual(rows[3][HEADERS.index("augment-pooling")], "max")
+            self.assertEqual(rows[4][HEADERS.index("test-augment")], "False")
 
 
 if __name__ == "__main__":
