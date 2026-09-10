@@ -1156,6 +1156,8 @@ def train_epoch_fn(epoch: int, train_loader: torch.utils.data.DataLoader,
         raise StopIteration()
     return epochs_wo_improvement
 
+    return epochs_wo_improvement
+
 
 def optuna_intermediate_value(metrics):
     for m in metrics:

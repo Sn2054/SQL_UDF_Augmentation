@@ -32,10 +32,12 @@ class PlotAugmentedCostEstimationTest(unittest.TestCase):
 
             self.assertEqual(actual["pullup"]["q50"], 1.4)
             self.assertEqual(actual["pushdown"]["q99"], 57.6)
+            self.assertEqual(actual["_meta"]["epochs"], 50.0)
 
     def test_settings_include_test_augment(self):
         args = argparse.Namespace(
             seed=42,
+            epochs=50,
             augment="True",
             test_augment="False",
             augment_pooling="hybrid",
@@ -47,6 +49,8 @@ class PlotAugmentedCostEstimationTest(unittest.TestCase):
         )
 
         self.assertIn("TEST_AUGMENT=False", format_settings(args))
+        self.assertIn("EPOCHS=50", format_settings(args))
+        self.assertIn("EPOCHS=50 (BASELINE_EPOCHS=100)", format_settings(args, baseline_epochs=100.0))
 
 
 if __name__ == "__main__":

@@ -13,6 +13,7 @@ from openpyxl import Workbook, load_workbook
 from openpyxl.styles import Font
 
 from summarize_repeated_runs import aggregate, read_workbooks
+from xlsx_lock import locked
 
 
 METRICS = ("q50", "q95", "q99")
@@ -197,39 +198,43 @@ def upsert_result(path: str, values: Dict[str, object]) -> None:
     if output_dir:
         os.makedirs(output_dir, exist_ok=True)
 
-    if os.path.exists(path):
-        workbook = load_workbook(path)
-        worksheet = workbook["Augmented"] if "Augmented" in workbook.sheetnames else workbook.active
-        worksheet.title = "Augmented"
-    else:
-        workbook = Workbook()
-        worksheet = workbook.active
-        worksheet.title = "Augmented"
+    with locked(path):
+        if os.path.exists(path):
+            workbook = load_workbook(path)
+            worksheet = workbook["Augmented"] if "Augmented" in workbook.sheetnames else workbook.active
+            worksheet.title = "Augmented"
+        else:
+            workbook = Workbook()
+            worksheet = workbook.active
+            worksheet.title = "Augmented"
 
-    results = read_existing_results(worksheet)
-    target_index = next(
-        (index for index, result in enumerate(results) if same_configuration(result, values)),
-        None,
-    )
-    if target_index is None:
-        results.append(values)
-    else:
-        results[target_index] = values
+        results = read_existing_results(worksheet)
+        target_index = next(
+            (index for index, result in enumerate(results) if same_configuration(result, values)),
+            None,
+        )
+        if target_index is None:
+            results.append(values)
+        else:
+            results[target_index] = values
 
-    worksheet.delete_rows(1, worksheet.max_row)
-    worksheet.append(HEADERS)
-    for cell in worksheet[1]:
-        cell.font = Font(bold=True)
-    for result in results:
-        worksheet.append(["" if result.get(header) is None else result.get(header) for header in HEADERS])
+        worksheet.delete_rows(1, worksheet.max_row)
+        worksheet.append(HEADERS)
+        for cell in worksheet[1]:
+            cell.font = Font(bold=True)
+        for result in results:
+            worksheet.append(["" if result.get(header) is None else result.get(header) for header in HEADERS])
 
-    worksheet.freeze_panes = "A2"
-    worksheet.auto_filter.ref = worksheet.dimensions
-    for column, header in enumerate(HEADERS, start=1):
-        width = max(len(header) + 2, 14 if header != "time_stamp" else 18)
-        worksheet.column_dimensions[worksheet.cell(row=1, column=column).column_letter].width = width
-    workbook.save(path)
-    workbook.close()
+        worksheet.freeze_panes = "A2"
+        worksheet.auto_filter.ref = worksheet.dimensions
+        for column, header in enumerate(HEADERS, start=1):
+            width = max(len(header) + 2, 14 if header != "time_stamp" else 18)
+            worksheet.column_dimensions[worksheet.cell(row=1, column=column).column_letter].width = width
+
+        tmp_path = f"{path}.tmp-{os.getpid()}"
+        workbook.save(tmp_path)
+        workbook.close()
+        os.replace(tmp_path, path)
 
 
 def main() -> int:
