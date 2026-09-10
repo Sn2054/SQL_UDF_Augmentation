@@ -67,8 +67,8 @@ DATABASE="duckdb"
 # 4. Held-out evaluation
 # =============================================================================
 
-TEST_DB="employee"
-CARDINALITY_TYPE="act"       #? est, act, dd, wj
+TEST_DB="${TEST_DB:-employee}"
+CARDINALITY_TYPE="${CARDINALITY_TYPE:-act}"       #? est, act, dd, wj
 TEST_ALL_CARDINALITY=False   #? False: selected type only; True: est, act, dd, and wj.
 
 # =============================================================================
@@ -87,9 +87,9 @@ BATCH_SIZE=512
 
 AUGMENT=True                          #? True, False
 TEST_AUGMENT=True                     #? Effective only when AUGMENT=True; False disables augmentation for held-out testing.
-AUGMENT_POOLING="attention"           #? mean, sum, max, weighted_mean, attention, hybrid
+AUGMENT_POOLING="${AUGMENT_POOLING:-attention}"  #? mean, sum, max, weighted_mean, attention, hybrid
 AUGMENT_REFINEMENT="gated_residual"   #? residual_sum, gated_residual
-AUGMENT_COARSE_LAYERS=1               #? 0, 1, 2, ... (run 1 round of message passing between the coarse/region nodes created by the augmentation.)
+AUGMENT_COARSE_LAYERS="${AUGMENT_COARSE_LAYERS:-1}"  #? 0, 1, 2, ... (run 1 round of message passing between the coarse/region nodes created by the augmentation.)
 AUGMENT_INCLUDE_INV=False             #? True, False
 AUGMENT_REFINE_RET=False              #? True, False
 LAMBDA_STRUCT="${LAMBDA_STRUCT:-0.001}"   #? 0.0, 0.001, 0.01, 0.05, 0.1 (total_loss = runtime_loss + LAMBDA_STRUCT * coarse_fine_loss)

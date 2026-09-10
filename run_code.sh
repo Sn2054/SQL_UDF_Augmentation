@@ -88,6 +88,19 @@ DATABASE="${DATABASE:-duckdb}"
 TEST_DB="${TEST_DB:-basketball}"       #? override via env, e.g. TEST_DB=carcinogenesis bash run_code.sh
 CARDINALITY_TYPE="${CARDINALITY_TYPE:-est}"       #? est, act, dd, wj (override via env, e.g. CARDINALITY_TYPE=act bash run_code.sh)
 TEST_ALL_CARDINALITY=False   #? False: selected type only; True: est, act, dd, and wj.
+CARDINALITY_TYPES="${CARDINALITY_TYPES:-}"   #? one or more space-separated types, or "all" -- see header comment
+
+if [[ -n "$CARDINALITY_TYPES" ]]; then
+    if [[ "${CARDINALITY_TYPES,,}" == "all" ]]; then
+        CARDINALITY_TYPE_LIST=(est act dd wj)
+    else
+        read -ra CARDINALITY_TYPE_LIST <<< "$CARDINALITY_TYPES"
+    fi
+elif [[ "${TEST_ALL_CARDINALITY,,}" == "true" ]]; then
+    CARDINALITY_TYPE_LIST=(est act dd wj)
+else
+    CARDINALITY_TYPE_LIST=("$CARDINALITY_TYPE")
+fi
 
 # =============================================================================
 # 5. Data loading and training
@@ -105,7 +118,7 @@ BATCH_SIZE="${BATCH_SIZE:-512}"
 
 AUGMENT="${AUGMENT:-False}"            #? True, False
 TEST_AUGMENT=True                     #? Effective only when AUGMENT=True; False disables augmentation for held-out testing.
-AUGMENT_POOLING="attention"           #? mean, sum, max, weighted_mean, attention, hybrid
+AUGMENT_POOLING="${AUGMENT_POOLING:-attention}"  #? mean, sum, max, weighted_mean, attention, hybrid
 AUGMENT_REFINEMENT="gated_residual"   #? residual_sum, gated_residual
 AUGMENT_COARSE_LAYERS="${AUGMENT_COARSE_LAYERS:-1}"  #? 0, 1, 2, ... (run 1 round of message passing between the coarse/region nodes created by the augmentation.)
 AUGMENT_INCLUDE_INV=False             #? True, False
