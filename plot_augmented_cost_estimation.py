@@ -37,6 +37,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--baseline-xlsx", required=True)
     parser.add_argument("--output-dir", required=True)
     parser.add_argument("--seed", required=True)
+    parser.add_argument("--epochs", required=True)
     parser.add_argument("--augment", required=True)
     parser.add_argument("--test-augment", required=True)
     parser.add_argument("--augment-pooling", required=True)
@@ -105,6 +106,8 @@ def read_baseline_workloads(
                     for metric in METRICS
                 },
             }
+            if "epochs" in header_index:
+                result["_meta"] = {"epochs": as_float(row[header_index["epochs"]])}
             break
     workbook.close()
     return result
@@ -158,9 +161,12 @@ def safe_filename_part(value: str) -> str:
     return re.sub(r"[^A-Za-z0-9_.-]+", "-", value).strip("-_") or "unknown"
 
 
-def format_settings(args: argparse.Namespace) -> str:
+def format_settings(args: argparse.Namespace, baseline_epochs: Optional[float] = None) -> str:
+    epochs_label = f"EPOCHS={args.epochs}"
+    if baseline_epochs is not None:
+        epochs_label += f" (BASELINE_EPOCHS={baseline_epochs:g})"
     return (
-        f"SEED={args.seed} | AUGMENT={args.augment} | TEST_AUGMENT={args.test_augment} | "
+        f"SEED={args.seed} | {epochs_label} | AUGMENT={args.augment} | TEST_AUGMENT={args.test_augment} | "
         f"AUGMENT_POOLING={args.augment_pooling} | "
         f"AUGMENT_REFINEMENT={args.augment_refinement}\n"
         f"AUGMENT_COARSE_LAYERS={args.augment_coarse_layers} | "
@@ -226,7 +232,8 @@ def create_plot(
         y=0.98,
     )
 
-    settings = format_settings(args)
+    baseline_epochs = baseline.get("_meta", {}).get("epochs")
+    settings = format_settings(args, baseline_epochs)
     figure.text(
         0.5,
         0.88,
