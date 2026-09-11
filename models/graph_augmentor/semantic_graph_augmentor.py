@@ -20,7 +20,8 @@ class SemanticGraphAugmentor(nn.Module):
             include_inv: bool = False,
             refine_ret: bool = True):
         super().__init__()
-        valid_pooling = {"mean", "sum", "max", "weighted_mean", "attention", "hybrid"}
+        valid_pooling = {"mean", "sum", "max", "weighted_mean", "attention", "hybrid",
+                         "hybrid_attn_max", "hybrid_max_wmean", "hybrid_max_wmean_gated"}
         valid_refinement = {"residual_sum", "gated_residual"}
         if pooling not in valid_pooling:
             raise ValueError(f"Unknown augment pooling {pooling}. Expected one of {sorted(valid_pooling)}")
@@ -39,6 +40,15 @@ class SemanticGraphAugmentor(nn.Module):
             # Preserve both the region-wide signal and its strongest activations,
             # then restore the hidden size expected by downstream layers.
             self.hybrid_projection = nn.Linear(hidden_dim * 2, hidden_dim)
+        if pooling == "hybrid_attn_max":
+            # Reuses self.attention_score for the attention branch; only the projection is new.
+            self.hybrid_attn_max_projection = nn.Linear(hidden_dim * 2, hidden_dim)
+        if pooling == "hybrid_max_wmean":
+            self.hybrid_max_wmean_projection = nn.Linear(hidden_dim * 2, hidden_dim)
+        if pooling == "hybrid_max_wmean_gated":
+            #? The gate must map to a hidden_dim-sized [0,1] mixing vector, not reduce
+            #? dimensionality like the concat+project hybrids do, so it needs its own layer.
+            self.hybrid_max_wmean_gate = nn.Linear(hidden_dim * 2, hidden_dim)
         self.coarse_update = nn.Sequential(
             nn.Linear(hidden_dim * 2, hidden_dim),
             nn.LeakyReLU(inplace=True),
@@ -150,6 +160,23 @@ class SemanticGraphAugmentor(nn.Module):
             mean_pooled = stacked.mean(dim=0)
             max_pooled = stacked.max(dim=0).values
             return self.hybrid_projection(torch.cat([mean_pooled, max_pooled], dim=-1))
+        if self.pooling == "hybrid_attn_max":
+            scores = self.attention_score(stacked)
+            attn = torch.softmax(scores, dim=0)
+            attn_pooled = (stacked * attn).sum(dim=0)
+            max_pooled = stacked.max(dim=0).values
+            return self.hybrid_attn_max_projection(torch.cat([attn_pooled, max_pooled], dim=-1))
+        if self.pooling == "hybrid_max_wmean":
+            max_pooled = stacked.max(dim=0).values
+            safe_weights = torch.clamp(weights, min=1.0)
+            wmean_pooled = (stacked * safe_weights).sum(dim=0) / safe_weights.sum(dim=0).clamp(min=1.0)
+            return self.hybrid_max_wmean_projection(torch.cat([max_pooled, wmean_pooled], dim=-1))
+        if self.pooling == "hybrid_max_wmean_gated":
+            max_pooled = stacked.max(dim=0).values
+            safe_weights = torch.clamp(weights, min=1.0)
+            wmean_pooled = (stacked * safe_weights).sum(dim=0) / safe_weights.sum(dim=0).clamp(min=1.0)
+            gate = torch.sigmoid(self.hybrid_max_wmean_gate(torch.cat([max_pooled, wmean_pooled], dim=-1)))
+            return gate * max_pooled + (1 - gate) * wmean_pooled
         raise ValueError(f"Unknown augment pooling {self.pooling}")
 
     def _coarse_message_passing(self, region_embeddings: torch.Tensor, region_members) -> torch.Tensor:

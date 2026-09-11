@@ -88,7 +88,7 @@ FINAL_ACTIVATION_CLASS_NAME="${FINAL_ACTIVATION_CLASS_NAME:-LeakyReLU}"  #? Leak
 
 AUGMENT=True                          #? True, False
 TEST_AUGMENT=True                     #? Effective only when AUGMENT=True; False disables augmentation for held-out testing.
-AUGMENT_POOLING="${AUGMENT_POOLING:-attention}"  #? mean, sum, max, weighted_mean, attention, hybrid
+AUGMENT_POOLING="${AUGMENT_POOLING:-attention}"  #? mean, sum, max, weighted_mean, attention, hybrid, hybrid_attn_max, hybrid_max_wmean, hybrid_max_wmean_gated
 AUGMENT_REFINEMENT="gated_residual"   #? residual_sum, gated_residual
 AUGMENT_COARSE_LAYERS="${AUGMENT_COARSE_LAYERS:-1}"  #? 0, 1, 2, ... (run 1 round of message passing between the coarse/region nodes created by the augmentation.)
 AUGMENT_INCLUDE_INV=False             #? True, False
