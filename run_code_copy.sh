@@ -80,6 +80,7 @@ INCLUDE_PULLUP_DATA=True
 INCLUDE_PUSHDOWN_DATA=True
 EPOCHS="${EPOCHS:-50}"
 BATCH_SIZE=512
+FINAL_ACTIVATION_CLASS_NAME="${FINAL_ACTIVATION_CLASS_NAME:-LeakyReLU}"  #? LeakyReLU, ReLU -- only the final output layer; message-passing/node-type layers stay LeakyReLU. ReLU has zero gradient for negative inputs, which combined with QLoss's steep penalty for near-zero/negative predictions could leave a bad prediction stuck at 0 with no way to correct -- untested, not a known-safe fix.
 
 # =============================================================================
 # 6. Semantic graph augmfwentation
@@ -159,6 +160,7 @@ fi
 COMMON_ARGS+=(
     --epochs "$EPOCHS"
     --batch_size "$BATCH_SIZE"
+    --final_activation_class_name "$FINAL_ACTIVATION_CLASS_NAME"
 
     --augment "$AUGMENT"
     --test_augment "$TEST_AUGMENT"
@@ -205,6 +207,7 @@ append_summary() {
             --run-variable "INCLUDE_PUSHDOWN_DATA=$INCLUDE_PUSHDOWN_DATA" \
             --run-variable "EPOCHS=$EPOCHS" \
             --run-variable "BATCH_SIZE=$BATCH_SIZE" \
+            --run-variable "FINAL_ACTIVATION_CLASS_NAME=$FINAL_ACTIVATION_CLASS_NAME" \
             --run-variable "AUGMENT=$AUGMENT" \
             --run-variable "TEST_AUGMENT=$TEST_AUGMENT" \
             --run-variable "AUGMENT_POOLING=$AUGMENT_POOLING" \
@@ -266,6 +269,7 @@ for ((run_index = 1; run_index <= N_RUNS; run_index++)); do
     echo "Include pushdown data: $INCLUDE_PUSHDOWN_DATA" | tee_log
     echo "Epochs: $EPOCHS" | tee_log
     echo "Batch size: $BATCH_SIZE" | tee_log
+    echo "Final activation: $FINAL_ACTIVATION_CLASS_NAME" | tee_log
 
     echo "Augment: $AUGMENT" | tee_log
     echo "Test augment: $TEST_AUGMENT" | tee_log

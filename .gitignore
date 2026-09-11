@@ -168,3 +168,6 @@ result_aggregation_notebooks/wandb_*
 # Generated training artifacts and reports
 /saved/
 /results/
+
+# NFS silly-rename artifacts (created when an open file is deleted/replaced on an NFS mount)
+.nfs*
