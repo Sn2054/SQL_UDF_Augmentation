@@ -74,6 +74,8 @@ def train_epoch(epoch_stats, train_loader, model, optimizer, max_epoch_tuples, c
     runtime_losses = []
     struct_losses = []
     errs = []
+    raw_preds = []
+    raw_labels = []
 
     error_ctr = 0
 
@@ -136,6 +138,8 @@ def train_epoch(epoch_stats, train_loader, model, optimizer, max_epoch_tuples, c
         output = output.detach().cpu().numpy().reshape(-1)
         label = label.detach().cpu().numpy().reshape(-1)
         errs = np.concatenate((errs, output - label))
+        raw_preds = np.concatenate((raw_preds, output)) # why we need this
+        raw_labels = np.concatenate((raw_labels, label))
         losses.append(loss)
 
         if pt_profiler is not None:
@@ -177,11 +181,28 @@ def train_epoch(epoch_stats, train_loader, model, optimizer, max_epoch_tuples, c
     mean_runtime_loss = np.mean(runtime_losses)
     mean_struct_loss = np.mean(struct_losses) if len(struct_losses) > 0 else 0.0
     mean_rmse = np.sqrt(np.mean(np.square(errs)))
-    # print(f"Train Loss: {mean_loss:.2f}")
-    # print(f"Train RMSE: {mean_rmse:.2f}")
+    print(f"Train Loss: {mean_loss:.2f}")
+    print(f"Train RMSE: {mean_rmse:.2f}")
+
+    train_q_error_min_val = 0.01  # matches QError's default in models/training/metrics.py
+    if model.label_norm is not None:
+        denorm_preds = model.label_norm.inverse_transform(raw_preds.reshape(-1, 1)).reshape(-1)
+        denorm_labels = model.label_norm.inverse_transform(raw_labels.reshape(-1, 1)).reshape(-1)
+    else:
+        denorm_preds = raw_preds
+        denorm_labels = raw_labels
+    clipped_preds = np.clip(denorm_preds, train_q_error_min_val, np.inf) # clip predictions to avoid division by zero or negative values
+    train_q_errors = np.maximum(denorm_labels / clipped_preds, clipped_preds / denorm_labels)
+    train_q_errors = np.nan_to_num(train_q_errors, nan=np.inf) # replace NaN values with infinity
+    train_median_q_error_50 = np.percentile(train_q_errors, 50)
+    train_median_q_error_95 = np.percentile(train_q_errors, 95)
+    train_median_q_error_99 = np.percentile(train_q_errors, 99)
+
     epoch_stats.update(train_time=time.perf_counter() - train_start_t, mean_loss=mean_loss,
                        mean_runtime_loss=mean_runtime_loss, mean_struct_loss=mean_struct_loss,
-                       mean_rmse=mean_rmse)
+                       mean_rmse=mean_rmse, train_median_q_error_50=train_median_q_error_50,
+                       train_median_q_error_95=train_median_q_error_95,
+                       train_median_q_error_99=train_median_q_error_99)
 
 
 def run_inference(data_loader: torch.utils.data.DataLoader, model: torch.nn.Module, max_epoch_tuples: int,
@@ -1037,23 +1058,6 @@ def train_epoch_fn(epoch: int, train_loader: torch.utils.data.DataLoader,
         max_epoch_tuples=max_epoch_tuples,
         prefix='val',
         log_to_wandb=register_at_wandb, separate_sql_udf_graphs=separate_sql_udf_graphs,
-        flat_vector_udf_est=flat_vector_udf_est)
-
-    # Train-accuracy proxy, mirroring the val-accuracy metrics above (same metrics list,
-    # same max_epoch_tuples cap as the training pass) so train_median_q_error_50 etc. land
-    # in the per-epoch csv_stats next to val_median_q_error_50 and can be plotted together.
-    # is_test_loader=True stops this from touching best-seen/early-stopping state, which
-    # must stay driven only by val/valtest.
-    validate_model(
-        train_loader,
-        model,
-        epoch=epoch,
-        validate_stats=epoch_stats,
-        metrics=metrics,
-        max_epoch_tuples=max_epoch_tuples,
-        prefix='train',
-        is_test_loader=True,
-        log_to_wandb=False, separate_sql_udf_graphs=separate_sql_udf_graphs,
         flat_vector_udf_est=flat_vector_udf_est)
 
     if test_loader is not None and valtest:

@@ -107,7 +107,7 @@ SAVE_LOSS_PLOTS="${SAVE_LOSS_PLOTS:-True}"   #? True, False -- generate train/va
 # 8. Values derived for this execution
 # =============================================================================
 
-GROUP_RUN_TIME="$(date +%Y%m%d_%H%M%S)"
+GROUP_RUN_TIME="$(date +%Y%m%d_%H%M%S)_$$"  #? PID suffix guards against collisions with a concurrent run_code.sh invocation that happens to start in the same second -- GROUP_RUN_TIME feeds LOG, AGGREGATE_LOG, and SUMMARY_XLSX, and a same-second collision means two unrelated runs silently share (and corrupt) those files.
 SUMMARY_STEM="${GROUP_RUN_TIME}_${TEST_DB}_${CARDINALITY_TYPE}_${AUGMENT}"
 AGGREGATE_XLSX="$SUMMARY_DIR/${SUMMARY_STEM}_aggregate.xlsx"
 AGGREGATE_LOG="$LOG_DIR/paper_${CARDINALITY_TYPE}_${GROUP_RUN_TIME}_n${N_RUNS}_aggregate.log"

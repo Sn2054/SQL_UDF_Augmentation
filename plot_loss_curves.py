@@ -126,8 +126,12 @@ def create_plot(csv_path: str, test_db: str, time_stamp: str, output_dir: str, a
     loss_ax.grid(axis="y", linestyle="--", alpha=0.3)
     loss_ax.set_axisbelow(True)
 
-    # "Accuracy" proxy: median q-error (q50), computed on both train and val in
-    # validate_model() (see train_epoch_fn in models/training/train.py).
+    # "Accuracy" proxy: median q-error (q50). val is a frozen end-of-epoch snapshot via
+    # validate_model(); train is computed cheaply inline in train_epoch() from the
+    # predictions/labels the training batches already produce (no extra pass) -- see
+    # models/training/train.py. Train reflects the model as it evolved *during* the
+    # epoch, so it's not a perfectly like-for-like snapshot vs. val, same caveat as
+    # mean_loss vs. val_loss on the left.
     acc_series = [df[col] for col in ("train_median_q_error_50", "val_median_q_error_50") if col in df.columns]
     if "train_median_q_error_50" in df.columns:
         acc_ax.plot(df["epoch"], df["train_median_q_error_50"], label="Train q50", color="#4C78A8", linewidth=1.8)
