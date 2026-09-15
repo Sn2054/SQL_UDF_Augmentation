@@ -164,12 +164,8 @@ if __name__ == '__main__':
     parser.add_argument('--optimizer', type=str, default=argparse.SUPPRESS)
     parser.add_argument('--min_runtime_ms', default=argparse.SUPPRESS, type=int,
                         help='min runtime in ms for plans to consider')
-    #? Only swaps the final output layer's activation (tree/node-type layers stay LeakyReLU).
-    #? Plain ReLU has zero gradient for negative inputs, so combined with QLoss's steep penalty
-    #? for near-zero/negative predictions, a bad prediction could get stuck at 0 with no way for
-    #? gradient descent to correct it -- this is an open question the flag is meant to test, not
-    #? a known-safe fix.
-    parser.add_argument('--final_activation_class_name', choices=['LeakyReLU', 'ReLU', 'CELU', 'SELU'], default=argparse.SUPPRESS)
+    #? Why? Simpler to apply one activation everywhere than special-case the output layer.
+    parser.add_argument('--activation_class_name', choices=['LeakyReLU', 'ReLU', 'CELU', 'SELU'], default=argparse.SUPPRESS)
 
     parser.add_argument('--zs_paper_dataset', default=False, action='store_true')
     parser.add_argument('--plans_have_no_udf', default=False, action='store_true')
@@ -345,8 +341,8 @@ if __name__ == '__main__':
         args_config['augment_refine_ret'] = args.augment_refine_ret
     if hasattr(args, 'lambda_struct'):
         args_config['lambda_struct'] = args.lambda_struct
-    if hasattr(args, 'final_activation_class_name'):
-        args_config['final_activation_class_name'] = args.final_activation_class_name
+    if hasattr(args, 'activation_class_name'):
+        args_config['activation_class_name'] = args.activation_class_name
 
     train_fn = functools.partial(run_train,
                                  orig_args_config=args_config,

@@ -111,7 +111,7 @@ INCLUDE_PULLUP_DATA="${INCLUDE_PULLUP_DATA:-True}"
 INCLUDE_PUSHDOWN_DATA="${INCLUDE_PUSHDOWN_DATA:-True}"
 EPOCHS="${EPOCHS:-50}"
 BATCH_SIZE="${BATCH_SIZE:-512}"
-FINAL_ACTIVATION_CLASS_NAME="${FINAL_ACTIVATION_CLASS_NAME:-LeakyReLU}"  #? LeakyReLU, ReLU -- only the final output layer; message-passing/node-type layers stay LeakyReLU. ReLU has zero gradient for negative inputs, which combined with QLoss's steep penalty for near-zero/negative predictions could leave a bad prediction stuck at 0 with no way to correct -- untested, not a known-safe fix.
+ACTIVATION_CLASS_NAME="${ACTIVATION_CLASS_NAME:-LeakyReLU}"  #? LeakyReLU, ReLU, CELU, SELU -- applies everywhere (final layer, message passing, node encoder). Why? Simpler than special-casing just the output layer.
 PRETRAINED_MODEL_ARTIFACT_DIR="${PRETRAINED_MODEL_ARTIFACT_DIR:-}"  #? Set both this and PRETRAINED_MODEL_FILENAME to resume an interrupted run -- checkpoint filenames are freshly timestamped every invocation, so a plain re-run does NOT auto-resume; point these at the old saved/models/<dir>/ and its filename (no .pt) explicitly.
 PRETRAINED_MODEL_FILENAME="${PRETRAINED_MODEL_FILENAME:-}"
 
@@ -190,7 +190,7 @@ append_summary() {
             --run-variable "INCLUDE_PUSHDOWN_DATA=$INCLUDE_PUSHDOWN_DATA" \
             --run-variable "EPOCHS=$EPOCHS" \
             --run-variable "BATCH_SIZE=$BATCH_SIZE" \
-            --run-variable "FINAL_ACTIVATION_CLASS_NAME=$FINAL_ACTIVATION_CLASS_NAME" \
+            --run-variable "ACTIVATION_CLASS_NAME=$ACTIVATION_CLASS_NAME" \
             --run-variable "AUGMENT=$AUGMENT" \
             --run-variable "TEST_AUGMENT=$TEST_AUGMENT" \
             --run-variable "AUGMENT_POOLING=$AUGMENT_POOLING" \
@@ -266,7 +266,7 @@ for CARDINALITY_TYPE in "${CARDINALITY_TYPE_LIST[@]}"; do
     COMMON_ARGS+=(
         --epochs "$EPOCHS"
         --batch_size "$BATCH_SIZE"
-        --final_activation_class_name "$FINAL_ACTIVATION_CLASS_NAME"
+        --activation_class_name "$ACTIVATION_CLASS_NAME"
 
         --augment "$AUGMENT"
         --test_augment "$TEST_AUGMENT"
@@ -317,7 +317,7 @@ for CARDINALITY_TYPE in "${CARDINALITY_TYPE_LIST[@]}"; do
         echo "Include pushdown data: $INCLUDE_PUSHDOWN_DATA" | tee_log
         echo "Epochs: $EPOCHS" | tee_log
         echo "Batch size: $BATCH_SIZE" | tee_log
-        echo "Final activation: $FINAL_ACTIVATION_CLASS_NAME" | tee_log
+        echo "Activation: $ACTIVATION_CLASS_NAME" | tee_log
         if [[ -n "$PRETRAINED_MODEL_ARTIFACT_DIR" && -n "$PRETRAINED_MODEL_FILENAME" ]]; then
             echo "Resuming from: $PRETRAINED_MODEL_ARTIFACT_DIR/$PRETRAINED_MODEL_FILENAME" | tee_log
         fi

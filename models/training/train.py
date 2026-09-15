@@ -138,7 +138,8 @@ def train_epoch(epoch_stats, train_loader, model, optimizer, max_epoch_tuples, c
         output = output.detach().cpu().numpy().reshape(-1)
         label = label.detach().cpu().numpy().reshape(-1)
         errs = np.concatenate((errs, output - label))
-        raw_preds = np.concatenate((raw_preds, output)) # why we need this
+        #? Why? errs only keeps the residual; q-error needs pred and label separately.
+        raw_preds = np.concatenate((raw_preds, output))
         raw_labels = np.concatenate((raw_labels, label))
         losses.append(loss)
 

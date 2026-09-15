@@ -61,7 +61,7 @@ def get_config(hyperparams: Dict[str, Any], wl_base_path: str, assemble_filename
 
     # general fc out
     fc_out_kwargs = dict(
-        activation_class_name='LeakyReLU',
+        activation_class_name=hyperparams.pop('activation_class_name', 'LeakyReLU'),
         activation_class_kwargs={},
         norm_class_name='Identity',
         norm_class_kwargs={},
@@ -478,15 +478,9 @@ def get_config(hyperparams: Dict[str, Any], wl_base_path: str, assemble_filename
     tree_layer_kwargs.update(**fc_out_kwargs)
     node_type_kwargs.update(**fc_out_kwargs)
 
-    if 'final_activation_class_name' in hyperparams:
-        #? Only the final output layer's activation is configurable; tree_layer_kwargs and
-        #? node_type_kwargs keep LeakyReLU. Plain ReLU here has zero gradient for negative
-        #? inputs, so combined with QLoss's steep penalty for near-zero/negative predictions,
-        #? a bad prediction could get stuck at 0 with no way for gradient descent to correct
-        #? it -- this is an open question the flag is meant to test, not a known-safe fix.
-        final_mlp_kwargs['activation_class_name'] = hyperparams.pop('final_activation_class_name')
-        if final_mlp_kwargs['activation_class_name'] != 'LeakyReLU':
-            model_name += f'_finalact{final_mlp_kwargs["activation_class_name"]}'
+    #? Why? Simpler to apply one activation everywhere than special-case the output layer.
+    if fc_out_kwargs['activation_class_name'] != 'LeakyReLU':
+        model_name += f'_act{fc_out_kwargs["activation_class_name"]}'
 
     config['final_mlp_kwargs'] = final_mlp_kwargs
     config['tree_layer_kwargs'] = tree_layer_kwargs
