@@ -32,8 +32,12 @@ RUN_SCRIPT="$SCRIPT_DIR/run_code.sh"
 # defaults). A short label (before the first space) is just for the
 # summary printout below.
 # -----------------------------------------------------------------------
+# resume-mean-cl1-l0.001 already completed (see augmented_cost_estimation.xlsx,
+# mean/cl1/l0.001) and is dropped from this list. attention-cl0-l0 was
+# interrupted mid-run (no result recorded) and is redone from scratch below.
+# wmean-cl1-l0.1 and hybrid-cl2-l0.01 never started.
+# -----------------------------------------------------------------------
 JOBS=(
-    "resume-mean-cl1-l0.001 TEST_DB=fhnk CARDINALITY_TYPE=est AUGMENT=True EPOCHS=100 AUGMENT_POOLING=mean AUGMENT_COARSE_LAYERS=1 LAMBDA_STRUCT=0.001 PRETRAINED_MODEL_ARTIFACT_DIR=$SCRIPT_DIR/saved/models/aug_est_complex_dd_pulluppushdown_ddestfonudf_liboh_gradnorm_mldupl_loopend_loopedge_fhnk_bs512_ep100_maxr30_augpoolmean_augrefgated_residual_augcl1_augnoRET_cfl0.001 PRETRAINED_MODEL_FILENAME=aug_est_complex_dd_pulluppushdown_ddestfonudf_liboh_gradnorm_mldupl_loopend_loopedge_fhnk_bs512_ep100_maxr30_augpoolmean_augrefgated_residual_augcl1_augnoRET_cfl0.001_20260913_045046_076"
     "attention-cl0-l0 TEST_DB=fhnk CARDINALITY_TYPE=est AUGMENT=True EPOCHS=100 AUGMENT_POOLING=attention AUGMENT_COARSE_LAYERS=0 LAMBDA_STRUCT=0.0"
     "wmean-cl1-l0.1 TEST_DB=fhnk CARDINALITY_TYPE=est AUGMENT=True EPOCHS=100 AUGMENT_POOLING=weighted_mean AUGMENT_COARSE_LAYERS=1 LAMBDA_STRUCT=0.1"
     "max-cl3-l0.1 TEST_DB=fhnk CARDINALITY_TYPE=est AUGMENT=True EPOCHS=100 AUGMENT_POOLING=max AUGMENT_COARSE_LAYERS=3 LAMBDA_STRUCT=0.1"

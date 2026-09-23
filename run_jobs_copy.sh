@@ -35,14 +35,20 @@ RUN_SCRIPT="$SCRIPT_DIR/run_code_copy.sh"
 # All jobs below hold coarse_layers=1, lambda_struct=0.1 fixed so they land
 # in the same comparable cohort as the existing attention (push q50=1.546)
 # and max (push q50=1.414) results already in augmented_cost_estimation.xlsx.
+#
+# hybrid_attn_max already completed (see augmented_cost_estimation.xlsx) and is
+# dropped from this list. hybrid_max_wmean was interrupted mid-run (no result
+# recorded) and is redone from scratch below. hybrid_max_wmean_gated and the
+# three activation jobs never started. Activation jobs now use
+# ACTIVATION_CLASS_NAME (applies model-wide: final layer + message passing +
+# node encoder), replacing the retired final-layer-only FINAL_ACTIVATION_CLASS_NAME.
 # -----------------------------------------------------------------------
 JOBS=(
-    "hybrid-attn-max TEST_DB=fhnk CARDINALITY_TYPE=est AUGMENT=True EPOCHS=100 AUGMENT_POOLING=hybrid_attn_max AUGMENT_COARSE_LAYERS=1 LAMBDA_STRUCT=0.1"
     "hybrid-max-wmean TEST_DB=fhnk CARDINALITY_TYPE=est AUGMENT=True EPOCHS=100 AUGMENT_POOLING=hybrid_max_wmean AUGMENT_COARSE_LAYERS=1 LAMBDA_STRUCT=0.1"
     "hybrid-max-wmean-gated TEST_DB=fhnk CARDINALITY_TYPE=est AUGMENT=True EPOCHS=100 AUGMENT_POOLING=hybrid_max_wmean_gated AUGMENT_COARSE_LAYERS=1 LAMBDA_STRUCT=0.1"
-    "final-act-relu TEST_DB=fhnk CARDINALITY_TYPE=est AUGMENT=True EPOCHS=100 AUGMENT_POOLING=attention AUGMENT_COARSE_LAYERS=1 LAMBDA_STRUCT=0.1 FINAL_ACTIVATION_CLASS_NAME=ReLU"
-    "final-act-celu TEST_DB=fhnk CARDINALITY_TYPE=est AUGMENT=True EPOCHS=100 AUGMENT_POOLING=attention AUGMENT_COARSE_LAYERS=1 LAMBDA_STRUCT=0.1 FINAL_ACTIVATION_CLASS_NAME=CELU"
-    "final-act-selu TEST_DB=fhnk CARDINALITY_TYPE=est AUGMENT=True EPOCHS=100 AUGMENT_POOLING=attention AUGMENT_COARSE_LAYERS=1 LAMBDA_STRUCT=0.1 FINAL_ACTIVATION_CLASS_NAME=SELU"
+    "act-relu TEST_DB=fhnk CARDINALITY_TYPE=est AUGMENT=True EPOCHS=100 AUGMENT_POOLING=attention AUGMENT_COARSE_LAYERS=1 LAMBDA_STRUCT=0.1 ACTIVATION_CLASS_NAME=ReLU"
+    "act-celu TEST_DB=fhnk CARDINALITY_TYPE=est AUGMENT=True EPOCHS=100 AUGMENT_POOLING=attention AUGMENT_COARSE_LAYERS=1 LAMBDA_STRUCT=0.1 ACTIVATION_CLASS_NAME=CELU"
+    "act-selu TEST_DB=fhnk CARDINALITY_TYPE=est AUGMENT=True EPOCHS=100 AUGMENT_POOLING=attention AUGMENT_COARSE_LAYERS=1 LAMBDA_STRUCT=0.1 ACTIVATION_CLASS_NAME=SELU"
 )
 
 declare -A exit_codes=()

@@ -44,7 +44,7 @@ umask 000
 # 1. Input and output paths
 # =============================================================================
 
-DATASET_BASE="/mnt/shared/data/dataset/Graceful_data"
+DATASET_BASE="${DATASET_BASE:-/mnt/store2/shehryar/data/Graceful_data}"
 WL_BASE="$DATASET_BASE/workload_runs/"
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
