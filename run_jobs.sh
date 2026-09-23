@@ -32,17 +32,29 @@ RUN_SCRIPT="$SCRIPT_DIR/run_code.sh"
 # defaults). A short label (before the first space) is just for the
 # summary printout below.
 # -----------------------------------------------------------------------
-# resume-mean-cl1-l0.001 already completed (see augmented_cost_estimation.xlsx,
-# mean/cl1/l0.001) and is dropped from this list. attention-cl0-l0 was
-# interrupted mid-run (no result recorded) and is redone from scratch below.
-# wmean-cl1-l0.1 and hybrid-cl2-l0.01 never started.
+# dkegpuserver2 weekend sweep, GPU 2 only (GPUs 0/1 are reserved by another
+# lab member). 7 configs x 3 held-out DBs, run DB-by-DB (fhnk, employee,
+# financial) so each finished DB is a complete comparison.
+#   - act-*: model-wide activation sweep, attention pooling held fixed.
+#     act-leakyrelu is also the reference row for the hybrid pooling runs.
+#   - pool-*: the three hybrid pooling modes, LeakyReLU held fixed.
+# All share coarse_layers=1 / lambda_struct=0.1 / est / 100 epochs so they
+# land in one comparable cohort (see understanding/progress.md sec. 8).
 # -----------------------------------------------------------------------
-JOBS=(
-    "attention-cl0-l0 TEST_DB=fhnk CARDINALITY_TYPE=est AUGMENT=True EPOCHS=100 AUGMENT_POOLING=attention AUGMENT_COARSE_LAYERS=0 LAMBDA_STRUCT=0.0"
-    "wmean-cl1-l0.1 TEST_DB=fhnk CARDINALITY_TYPE=est AUGMENT=True EPOCHS=100 AUGMENT_POOLING=weighted_mean AUGMENT_COARSE_LAYERS=1 LAMBDA_STRUCT=0.1"
-    "max-cl3-l0.1 TEST_DB=fhnk CARDINALITY_TYPE=est AUGMENT=True EPOCHS=100 AUGMENT_POOLING=max AUGMENT_COARSE_LAYERS=3 LAMBDA_STRUCT=0.1"
-    "hybrid-cl2-l0.01 TEST_DB=fhnk CARDINALITY_TYPE=est AUGMENT=True EPOCHS=100 AUGMENT_POOLING=hybrid AUGMENT_COARSE_LAYERS=2 LAMBDA_STRUCT=0.01"
-)
+COMMON="DEVICE=2 CARDINALITY_TYPE=est AUGMENT=True EPOCHS=100 AUGMENT_COARSE_LAYERS=1 LAMBDA_STRUCT=0.1"
+
+JOBS=()
+for db in fhnk employee financial; do
+    JOBS+=(
+        "$db-act-leakyrelu TEST_DB=$db $COMMON AUGMENT_POOLING=attention ACTIVATION_CLASS_NAME=LeakyReLU"
+        "$db-act-relu TEST_DB=$db $COMMON AUGMENT_POOLING=attention ACTIVATION_CLASS_NAME=ReLU"
+        "$db-act-selu TEST_DB=$db $COMMON AUGMENT_POOLING=attention ACTIVATION_CLASS_NAME=SELU"
+        "$db-act-celu TEST_DB=$db $COMMON AUGMENT_POOLING=attention ACTIVATION_CLASS_NAME=CELU"
+        "$db-pool-hybrid_attn_max TEST_DB=$db $COMMON AUGMENT_POOLING=hybrid_attn_max ACTIVATION_CLASS_NAME=LeakyReLU"
+        "$db-pool-hybrid_max_wmean TEST_DB=$db $COMMON AUGMENT_POOLING=hybrid_max_wmean ACTIVATION_CLASS_NAME=LeakyReLU"
+        "$db-pool-hybrid_max_wmean_gated TEST_DB=$db $COMMON AUGMENT_POOLING=hybrid_max_wmean_gated ACTIVATION_CLASS_NAME=LeakyReLU"
+    )
+done
 
 declare -A exit_codes=()
 
