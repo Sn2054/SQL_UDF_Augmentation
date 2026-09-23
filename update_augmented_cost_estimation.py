@@ -26,6 +26,7 @@ CONFIG_HEADERS = (
     "augment-include-inv",
     "augment-refine-ret",
     "lambda-struct",
+    "activation",
 )
 HEADERS = [
     "test_db",
@@ -55,6 +56,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--augment-include-inv", required=True)
     parser.add_argument("--augment-refine-ret", required=True)
     parser.add_argument("--lambda-struct", type=float, required=True)
+    parser.add_argument("--activation", default="LeakyReLU")
     return parser.parse_args()
 
 
@@ -144,6 +146,7 @@ def build_values(
         "augment-include-inv": args.augment_include_inv,
         "augment-refine-ret": args.augment_refine_ret,
         "lambda-struct": args.lambda_struct,
+        "activation": args.activation,
     }
     for kind, prefix in WORKLOAD_PREFIXES:
         for metric in METRICS:
@@ -188,6 +191,9 @@ def same_configuration(left: Dict[str, object], right: Dict[str, object]) -> boo
             left_value = "True" if left.get(header) in (None, "") else left.get(header)
             if normalized(left_value) != normalized(right.get(header)):
                 return False
+        # Rows created before the activation column existed stay blank and never match a new
+        # row: their activation can't be confirmed from the row alone, so a rerun appends
+        # instead of silently overwriting them.
         elif normalized(left.get(header)) != normalized(right.get(header)):
             return False
     return True
