@@ -437,6 +437,7 @@ for CARDINALITY_TYPE in "${CARDINALITY_TYPE_LIST[@]}"; do
                 --augment-include-inv "$AUGMENT_INCLUDE_INV" \
                 --augment-refine-ret "$AUGMENT_REFINE_RET" \
                 --lambda-struct "$LAMBDA_STRUCT" \
+                --activation "$ACTIVATION_CLASS_NAME" \
                 "${RUN_XLSXS[@]}" 2>&1 | tee_log
             augmented_results_exit_code="${PIPESTATUS[0]}"
             set -e

@@ -27,6 +27,7 @@ def arguments(**overrides):
         "augment_include_inv": "False",
         "augment_refine_ret": "False",
         "lambda_struct": 0.0,
+        "activation": "LeakyReLU",
     }
     values.update(overrides)
     return argparse.Namespace(**values)
@@ -45,6 +46,7 @@ class UpdateAugmentedCostEstimationTest(unittest.TestCase):
             "augment-include-inv": "False",
             "augment-refine-ret": "False",
             "lambda-struct": 0.0,
+            "activation": "LeakyReLU",
         }
         legacy = {**current, "test-augment": None}
 
@@ -139,6 +141,53 @@ class UpdateAugmentedCostEstimationTest(unittest.TestCase):
             self.assertEqual(rows[2][HEADERS.index("epochs")], 200)
             self.assertEqual(rows[3][HEADERS.index("augment-pooling")], "max")
             self.assertEqual(rows[4][HEADERS.index("test-augment")], "False")
+
+    def test_legacy_blank_activation_is_kept_not_overwritten(self):
+        current = {
+            "test_db": "accidents",
+            "cardinality_type": "est",
+            "epochs": 100,
+            "test-augment": "True",
+            "augment-pooling": "hybrid",
+            "augment-refinement": "gated_residual",
+            "augment-coarse-layers": 1,
+            "augment-include-inv": "False",
+            "augment-refine-ret": "False",
+            "lambda-struct": 0.0,
+            "activation": "LeakyReLU",
+        }
+        legacy = {**current, "activation": None}
+
+        self.assertFalse(same_configuration(legacy, current))
+        self.assertTrue(same_configuration(current, {**current, "activation": "leakyrelu"}))
+
+    def test_upsert_keeps_one_row_per_activation(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "augmented.xlsx"
+            summary = {
+                "workloads": {
+                    "workload_pullup_est": {
+                        "q50": (2.5, 0.0, 1), "q95": (5.0, 0.0, 1), "q99": (8.5, 0.0, 1),
+                    },
+                    "workload_pushdown_est": {
+                        "q50": (3.0, 0.0, 1), "q95": (6.0, 0.0, 1), "q99": (9.0, 0.0, 1),
+                    },
+                }
+            }
+            baseline = {
+                "pullup": {"q50": 4.0, "q95": 7.0, "q99": 10.0},
+                "pushdown": {"q50": 5.0, "q95": 8.0, "q99": 11.0},
+            }
+            for activation in ("LeakyReLU", "ReLU", "SELU", "CELU"):
+                upsert_result(str(path), build_values(arguments(activation=activation), summary, baseline))
+
+            workbook = load_workbook(path, read_only=True, data_only=True)
+            rows = list(workbook["Augmented"].iter_rows(values_only=True))
+            workbook.close()
+            self.assertEqual(
+                [row[HEADERS.index("activation")] for row in rows[1:]],
+                ["LeakyReLU", "ReLU", "SELU", "CELU"],
+            )
 
 
 if __name__ == "__main__":
