@@ -1,6 +1,7 @@
 from collections import defaultdict
-from typing import Dict, List, Set, Tuple
+from typing import Dict, List, Optional, Set, Tuple
 
+import networkx as nx
 import torch
 from torch import nn
 import torch.nn.functional as F
@@ -69,35 +70,141 @@ class SemanticGraphAugmentor(nn.Module):
         return refined
 
     def _extract_regions(self, graph) -> Tuple[List[Tuple[str, int]], List[List[Tuple[str, int]]]]:
-        #? A first code-aligned region is the local typed neighborhood around each LOOP or BRANCH node.
+        #? Each region is the full single-entry-single-exit (SESE) body of a LOOP or BRANCH node:
+        #? every node forward-dominated by the head, up to its immediate post-dominator (where the
+        #? loop body / branch arms reconverge) -- not just its direct one-hop neighbors.
         regions = []
         region_members = []
+        control_flow_graph = self._build_control_flow_graph(graph)
+        if control_flow_graph is None:
+            return regions, region_members
+
+        children_by_dominator, immediate_post_dominator = self._compute_region_dominance(control_flow_graph)
         for region_type in ("LOOP", "BRANCH"):
             if region_type not in graph.ntypes:
                 continue
             for region_node_id in range(graph.num_nodes(region_type)):
-                members = self._extract_region_members(graph, region_type, region_node_id)
+                head = (region_type, region_node_id)
+                if head not in control_flow_graph:
+                    continue
+                members = self._extract_region_members(
+                    control_flow_graph, children_by_dominator, immediate_post_dominator, head)
                 if len(members) > 1:
                     regions.append((region_type, region_node_id))
                     region_members.append(sorted(members))
         return regions, region_members
 
-    def _extract_region_members(self, graph, region_type: str, region_node_id: int) -> Set[Tuple[str, int]]:
-        members = {(region_type, region_node_id)}
+    def _build_control_flow_graph(self, graph) -> Optional[nx.DiGraph]:
+        #? Flatten the heterogeneous UDF node types into a single control-flow graph so region
+        #? membership can be derived from actual CFG topology rather than DGL edge-type bookkeeping.
+        control_flow_graph = nx.DiGraph()
+        for node_type in UDF_NODE_TYPES:
+            if node_type not in graph.ntypes:
+                continue
+            control_flow_graph.add_nodes_from((node_type, node_id) for node_id in range(graph.num_nodes(node_type)))
+
+        if control_flow_graph.number_of_nodes() == 0:
+            return None
+
         for src_type, edge_type, dst_type in graph.canonical_etypes:
             if src_type not in UDF_NODE_TYPES or dst_type not in UDF_NODE_TYPES:
                 continue
             src_ids, dst_ids = graph.edges(etype=(src_type, edge_type, dst_type))
             src_list = src_ids.detach().cpu().tolist()
             dst_list = dst_ids.detach().cpu().tolist()
-            if src_type == region_type:
-                for src_id, dst_id in zip(src_list, dst_list):
-                    if src_id == region_node_id:
-                        members.add((dst_type, dst_id))
-            if dst_type == region_type:
-                for src_id, dst_id in zip(src_list, dst_list):
-                    if dst_id == region_node_id:
-                        members.add((src_type, src_id))
+            for src_id, dst_id in zip(src_list, dst_list):
+                control_flow_graph.add_edge((src_type, src_id), (dst_type, dst_id))
+        return control_flow_graph
+
+    def _compute_region_dominance(self, control_flow_graph: nx.DiGraph):
+        #? A batched graph holds several UDF instances as disjoint components, each with its own
+        #? entry (INV) node, so dominance is computed per component. Post-dominance is computed by
+        #? reversing the component and routing every terminal node through one virtual exit, since a
+        #? UDF can have multiple RET/dead-end nodes and post-dominance needs a single sink.
+        children_by_dominator = defaultdict(list)
+        immediate_post_dominator = {}
+        for component in nx.weakly_connected_components(control_flow_graph):
+            subgraph = control_flow_graph.subgraph(component)
+            entries = [node for node in subgraph if subgraph.in_degree(node) == 0]
+            if len(entries) != 1:
+                # Ambiguous entry point for this component; skip rather than guess.
+                continue
+            entry = entries[0]
+
+            immediate_dominator = nx.immediate_dominators(subgraph, entry)
+            for node, dominator in immediate_dominator.items():
+                if node != dominator:
+                    children_by_dominator[dominator].append(node)
+
+            reverse_subgraph = subgraph.reverse(copy=True)
+            virtual_exit = object()
+            reverse_subgraph.add_node(virtual_exit)
+            for node in subgraph:
+                if subgraph.out_degree(node) == 0:
+                    reverse_subgraph.add_edge(virtual_exit, node)
+
+            immediate_post_dom = nx.immediate_dominators(reverse_subgraph, virtual_exit)
+            for node, post_dominator in immediate_post_dom.items():
+                if node != virtual_exit:
+                    immediate_post_dominator[node] = post_dominator
+
+        return children_by_dominator, immediate_post_dominator
+
+    def _dominated_set(self, children_by_dominator, root) -> Set[Tuple[str, int]]:
+        dominated = set()
+        stack = [root]
+        while stack:
+            node = stack.pop()
+            if node in dominated:
+                continue
+            dominated.add(node)
+            stack.extend(children_by_dominator.get(node, ()))
+        return dominated
+
+    def _find_matching_loop_end(self, control_flow_graph: nx.DiGraph, loop_head) -> Optional[Tuple[str, int]]:
+        #? A LOOP node has a single successor (its body), so post-dominance of the head only ever
+        #? gives that immediate next node, not the loop's true end. Instead, walk the body forward
+        #? and bracket-match LOOP/LOOPEND nesting depth to find the LOOPEND that actually closes
+        #? this loop (as opposed to a nested loop's own end).
+        stack = [(successor, 0) for successor in control_flow_graph.successors(loop_head)]
+        seen = set()
+        matches = set()
+        while stack:
+            node, depth = stack.pop()
+            if node[0] == "LOOP":
+                depth += 1
+            elif node[0] == "LOOPEND":
+                if depth == 0:
+                    matches.add(node)
+                    continue  # don't walk past this loop's own end
+                depth -= 1
+
+            state = (node, depth)
+            if state in seen:
+                continue
+            seen.add(state)
+            stack.extend((successor, depth) for successor in control_flow_graph.successors(node))
+
+        if len(matches) == 1:
+            return next(iter(matches))
+        return None
+
+    def _extract_region_members(
+            self, control_flow_graph, children_by_dominator, immediate_post_dominator, head) -> Set[Tuple[str, int]]:
+        members = self._dominated_set(children_by_dominator, head)
+        if head[0] == "LOOP":
+            boundary = self._find_matching_loop_end(control_flow_graph, head)
+        else:
+            boundary = immediate_post_dominator.get(head)
+            if not isinstance(boundary, tuple):
+                boundary = None
+
+        if boundary is not None:
+            # Everything from the reconvergence point onward is no longer exclusive to this
+            # region; drop it, then keep the boundary node itself as the region's end marker
+            # (the loop's matching LOOP_END, or the branch's join node).
+            members -= self._dominated_set(children_by_dominator, boundary)
+            members.add(boundary)
         return members
 
     def _coarsen_regions(self, graph, feat_dict, regions, region_members):
