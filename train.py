@@ -165,7 +165,7 @@ if __name__ == '__main__':
     parser.add_argument('--min_runtime_ms', default=argparse.SUPPRESS, type=int,
                         help='min runtime in ms for plans to consider')
     #? Why? Simpler to apply one activation everywhere than special-case the output layer.
-    parser.add_argument('--activation_class_name', choices=['LeakyReLU', 'ReLU', 'CELU', 'SELU'], default=argparse.SUPPRESS)
+    parser.add_argument('--activation_class_name', choices=['LeakyReLU', 'ReLU', 'CELU', 'SELU', 'GELU', 'SiLU'], default=argparse.SUPPRESS)
 
     parser.add_argument('--zs_paper_dataset', default=False, action='store_true')
     parser.add_argument('--plans_have_no_udf', default=False, action='store_true')

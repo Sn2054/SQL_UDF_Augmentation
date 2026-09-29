@@ -111,7 +111,7 @@ INCLUDE_PULLUP_DATA="${INCLUDE_PULLUP_DATA:-True}"
 INCLUDE_PUSHDOWN_DATA="${INCLUDE_PUSHDOWN_DATA:-True}"
 EPOCHS="${EPOCHS:-50}"
 BATCH_SIZE="${BATCH_SIZE:-512}"
-ACTIVATION_CLASS_NAME="${ACTIVATION_CLASS_NAME:-LeakyReLU}"  #? LeakyReLU, ReLU, CELU, SELU -- applies everywhere (final layer, message passing, node encoder). Why? Simpler than special-casing just the output layer.
+ACTIVATION_CLASS_NAME="${ACTIVATION_CLASS_NAME:-LeakyReLU}"  #? LeakyReLU, ReLU, CELU, SELU, GELU, SiLU -- applies everywhere (final layer, message passing, node encoder). Why? Simpler than special-casing just the output layer.
 PRETRAINED_MODEL_ARTIFACT_DIR="${PRETRAINED_MODEL_ARTIFACT_DIR:-}"  #? Set both this and PRETRAINED_MODEL_FILENAME to resume an interrupted run -- checkpoint filenames are freshly timestamped every invocation, so a plain re-run does NOT auto-resume; point these at the old saved/models/<dir>/ and its filename (no .pt) explicitly.
 PRETRAINED_MODEL_FILENAME="${PRETRAINED_MODEL_FILENAME:-}"
 
