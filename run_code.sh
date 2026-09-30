@@ -71,6 +71,12 @@ N_RUNS=1                 #? Number of sequential repetitions; all repetitions us
 SEED=42 
 DEVICE="${DEVICE:-0}"
 CUDA_DEVICE="cuda:${DEVICE:-0}"  #? Any integer, e.g. 0, 1, 2, 42.
+GPU_UUID="${GPU_UUID:-}"  #? e.g. GPU-042f3a36-...; overrides DEVICE. Pins the run to that physical GPU via CUDA_VISIBLE_DEVICES (index order can differ between nvidia-smi and CUDA, and across reboots; the UUID can't).
+if [[ -n "$GPU_UUID" ]]; then
+    export CUDA_VISIBLE_DEVICES="$GPU_UUID"
+    DEVICE="$GPU_UUID"
+    CUDA_DEVICE="cuda:0"  # the only GPU this process can see
+fi
 DETERMINISTIC=True       #? True, False
 
 # =============================================================================
@@ -177,6 +183,7 @@ append_summary() {
             --run-variable "N_RUNS=$N_RUNS" \
             --run-variable "DEVICE=$DEVICE" \
             --run-variable "CUDA_DEVICE=$CUDA_DEVICE" \
+            --run-variable "GPU_UUID=$GPU_UUID" \
             --run-variable "SEED=$SEED" \
             --run-variable "DETERMINISTIC=$DETERMINISTIC" \
             --run-variable "MODEL_CONFIG=$MODEL_CONFIG" \
@@ -300,6 +307,9 @@ for CARDINALITY_TYPE in "${CARDINALITY_TYPE_LIST[@]}"; do
         echo "Models output: $MODELS_OUT" | tee_log
 
         echo "CUDA device: $CUDA_DEVICE" | tee_log
+        if [[ -n "$GPU_UUID" ]]; then
+            echo "GPU UUID: $GPU_UUID (CUDA_VISIBLE_DEVICES)" | tee_log
+        fi
         echo "Seed: $SEED" | tee_log
         echo "Deterministic: $DETERMINISTIC" | tee_log
         echo "Python hash seed: $PYTHONHASHSEED" | tee_log
@@ -365,7 +375,8 @@ for CARDINALITY_TYPE in "${CARDINALITY_TYPE_LIST[@]}"; do
                     --augment-coarse-layers "$AUGMENT_COARSE_LAYERS" \
                     --augment-include-inv "$AUGMENT_INCLUDE_INV" \
                     --augment-refine-ret "$AUGMENT_REFINE_RET" \
-                    --lambda-struct "$LAMBDA_STRUCT" | tee_log
+                    --lambda-struct "$LAMBDA_STRUCT" \
+                    --activation "$ACTIVATION_CLASS_NAME" | tee_log
                 set -e
             else
                 echo "Loss curve skipped: stats CSV not found at $stats_csv_path" | tee_log
@@ -468,6 +479,7 @@ for CARDINALITY_TYPE in "${CARDINALITY_TYPE_LIST[@]}"; do
                 --augment-include-inv "$AUGMENT_INCLUDE_INV" \
                 --augment-refine-ret "$AUGMENT_REFINE_RET" \
                 --lambda-struct "$LAMBDA_STRUCT" \
+                --activation "$ACTIVATION_CLASS_NAME" \
                 "${RUN_XLSXS[@]}" 2>&1 | tee_log
             plot_exit_code="${PIPESTATUS[0]}"
             set -e

@@ -46,6 +46,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--augment-include-inv", required=True)
     parser.add_argument("--augment-refine-ret", required=True)
     parser.add_argument("--lambda-struct", required=True)
+    parser.add_argument("--activation", default="LeakyReLU")
     return parser.parse_args()
 
 
@@ -166,7 +167,8 @@ def format_settings(args: argparse.Namespace, baseline_epochs: Optional[float] =
     if baseline_epochs is not None:
         epochs_label += f" (BASELINE_EPOCHS={baseline_epochs:g})"
     return (
-        f"SEED={args.seed} | {epochs_label} | AUGMENT={args.augment} | TEST_AUGMENT={args.test_augment} | "
+        f"SEED={args.seed} | {epochs_label} | ACTIVATION={getattr(args, 'activation', 'LeakyReLU')} | AUGMENT={args.augment} | "
+        f"TEST_AUGMENT={args.test_augment} | "
         f"AUGMENT_POOLING={args.augment_pooling} | "
         f"AUGMENT_REFINEMENT={args.augment_refinement}\n"
         f"AUGMENT_COARSE_LAYERS={args.augment_coarse_layers} | "

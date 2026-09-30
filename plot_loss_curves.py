@@ -43,6 +43,7 @@ AUGMENT_COARSE_LAYERS = "1"
 AUGMENT_INCLUDE_INV = "False"
 AUGMENT_REFINE_RET = "False"
 LAMBDA_STRUCT = "0"
+ACTIVATION = "LeakyReLU"
 SHOW_VALTEST = False  # valtest_loss can spike orders of magnitude above train/val (generalization gap)
 LOG_SCALE = False     # log-scale the loss axis; helps when spikes would otherwise dominate the y-range
 
@@ -63,6 +64,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--augment-include-inv", default=AUGMENT_INCLUDE_INV)
     parser.add_argument("--augment-refine-ret", default=AUGMENT_REFINE_RET)
     parser.add_argument("--lambda-struct", default=LAMBDA_STRUCT)
+    parser.add_argument("--activation", default=ACTIVATION)
     parser.add_argument("--show-valtest", action="store_true", default=SHOW_VALTEST,
                         help="Also plot valtest_loss (the actual held-out DB)")
     parser.add_argument("--log-scale", action="store_true", default=LOG_SCALE,
@@ -75,7 +77,7 @@ def safe_filename_part(value: str) -> str:
 
 
 def format_settings(args: argparse.Namespace) -> str:
-    settings = f"SEED={args.seed} | CARDINALITY={args.cardinality} | AUGMENT={args.augment}"
+    settings = f"SEED={args.seed} | CARDINALITY={args.cardinality} | ACTIVATION={args.activation} | AUGMENT={args.augment}"
     if str(args.augment).strip().lower() == "true":
         settings += (
             f" | TEST_AUGMENT={args.test_augment}\n"
