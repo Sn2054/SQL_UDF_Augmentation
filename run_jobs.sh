@@ -32,27 +32,30 @@ RUN_SCRIPT="$SCRIPT_DIR/run_code.sh"
 # defaults). A short label (before the first space) is just for the
 # summary printout below.
 # -----------------------------------------------------------------------
-# dkegpuserver2 weekend sweep, GPU 2 only (GPUs 0/1 are reserved by another
-# lab member). 7 configs x 3 held-out DBs, run DB-by-DB (fhnk, employee,
-# financial) so each finished DB is a complete comparison.
-#   - act-*: model-wide activation sweep, attention pooling held fixed.
-#     act-leakyrelu is also the reference row for the hybrid pooling runs.
-#   - pool-*: the three hybrid pooling modes, LeakyReLU held fixed.
-# All share coarse_layers=1 / lambda_struct=0.1 / est / 100 epochs so they
-# land in one comparable cohort (see understanding/progress.md sec. 8).
+# Leftover sweep (2026-09-30). Pinned by GPU UUID, not index: index order can
+# differ between nvidia-smi and CUDA and across reboots, the UUID can't.
+# Same cohort as the first sweep (coarse_layers=1 / lambda_struct=0.1 / est /
+# 100 epochs), see understanding/progress.md sec. 8.
+#   - fhnk: only GELU and SiLU are new (LeakyReLU/ReLU/SELU/CELU and both
+#     hybrids already have rows).
+#   - employee, financial: activations ReLU/SELU/CELU/GELU/SiLU (attention
+#     pooling) and the two hybrids (LeakyReLU). No LeakyReLU or gated runs.
 # -----------------------------------------------------------------------
-COMMON="DEVICE=2 CARDINALITY_TYPE=est AUGMENT=True EPOCHS=100 AUGMENT_COARSE_LAYERS=1 LAMBDA_STRUCT=0.1"
+COMMON="GPU_UUID=GPU-042f3a36-fa80-8994-33b1-37c79834d513 CARDINALITY_TYPE=est AUGMENT=True EPOCHS=100 AUGMENT_COARSE_LAYERS=1 LAMBDA_STRUCT=0.1"
 
-JOBS=()
-for db in fhnk employee financial; do
+JOBS=(
+    "fhnk-act-gelu TEST_DB=fhnk $COMMON AUGMENT_POOLING=attention ACTIVATION_CLASS_NAME=GELU"
+    "fhnk-act-silu TEST_DB=fhnk $COMMON AUGMENT_POOLING=attention ACTIVATION_CLASS_NAME=SiLU"
+)
+for db in employee financial; do
     JOBS+=(
-        "$db-act-leakyrelu TEST_DB=$db $COMMON AUGMENT_POOLING=attention ACTIVATION_CLASS_NAME=LeakyReLU"
         "$db-act-relu TEST_DB=$db $COMMON AUGMENT_POOLING=attention ACTIVATION_CLASS_NAME=ReLU"
         "$db-act-selu TEST_DB=$db $COMMON AUGMENT_POOLING=attention ACTIVATION_CLASS_NAME=SELU"
         "$db-act-celu TEST_DB=$db $COMMON AUGMENT_POOLING=attention ACTIVATION_CLASS_NAME=CELU"
+        "$db-act-gelu TEST_DB=$db $COMMON AUGMENT_POOLING=attention ACTIVATION_CLASS_NAME=GELU"
+        "$db-act-silu TEST_DB=$db $COMMON AUGMENT_POOLING=attention ACTIVATION_CLASS_NAME=SiLU"
         "$db-pool-hybrid_attn_max TEST_DB=$db $COMMON AUGMENT_POOLING=hybrid_attn_max ACTIVATION_CLASS_NAME=LeakyReLU"
         "$db-pool-hybrid_max_wmean TEST_DB=$db $COMMON AUGMENT_POOLING=hybrid_max_wmean ACTIVATION_CLASS_NAME=LeakyReLU"
-        "$db-pool-hybrid_max_wmean_gated TEST_DB=$db $COMMON AUGMENT_POOLING=hybrid_max_wmean_gated ACTIVATION_CLASS_NAME=LeakyReLU"
     )
 done
 
