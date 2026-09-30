@@ -89,7 +89,7 @@ def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
 
     parser.add_argument('--test_db', required=True, help='Held-out test database, e.g. consumer')
-    parser.add_argument('--wl_base_path', default='/mnt/shared/data/dataset/Graceful_data/workload_runs/',
+    parser.add_argument('--wl_base_path', default='/mnt/store5/ishana/data/Graceful_data/workload_runs/',
                         help='Root of duckdb_pushdown / duckdb_pullup workload runs (matches WL_BASE in run_code.sh)')
     parser.add_argument('--pushdown_plans_path', default=None,
                         help='Override: defaults to <wl_base_path>/duckdb_pushdown/parsed_plans/<test_db>/workload.json')

@@ -8,9 +8,17 @@
 #   - N_RUNS sequential repetitions for the configured held-out database
 #
 # TEST_ALL_CARDINALITY selects either the configured card type or all four card types.
-# TEST_DB=carcinogenesis CARDINALITY_TYPES=wj DEVICE=1 bash run_code.sh
-#   CARDINALITY_TYPES="est act dd wj" AUGMENT=False bash run_code.sh
-#   CARDINALITY_TYPES=all bash run_code.sh            # expands to: est act dd wj
+#   GPU_UUID=GPU-xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx TEST_DB=carcinogenesis CARDINALITY_TYPES=wj bash run_code.sh
+#   GPU_UUID=GPU-... CARDINALITY_TYPES="est act dd wj" AUGMENT=False bash run_code.sh
+#   GPU_UUID=GPU-... CARDINALITY_TYPES=all bash run_code.sh   # expands to: est act dd wj
+#
+# GPU selection follows the DKE lab server manual (sec. 3.3): GPUs are chosen
+# by the UUID assigned to you, never by index. GPU_UUID is exported as
+# CUDA_VISIBLE_DEVICES before any Python/CUDA process starts, so inside
+# train.py the assigned GPU is always the local device cuda:0 and no other GPU
+# is ever touched. Find UUIDs with `nvidia-smi -L`. Inside a Slurm allocation
+# (srun/sbatch --gres=gpu:1) leave GPU_UUID unset -- Slurm's own
+# CUDA_VISIBLE_DEVICES is used as-is.
 #
 # CARDINALITY_TYPES accepts one or more space-separated types and loops over
 # them sequentially (one full train+write cycle per type, one after another --
@@ -27,27 +35,42 @@
 #
 # Prerequisites:
 #   1. setup_symlinks.sh has been run (all 20 DBs linked under graceful_results/)
-#   2. You are inside a tmux session
+#   2. You are inside a tmux session with the Python env (torch + dgl) activated
+#   3. You have been assigned a GPU (check `nvidia-smi` / `squeue` first)
 #
 # Usage:
 #   tmux new -s my_run
-#   bash run_code.sh
+#   GPU_UUID=GPU-... bash run_code.sh
 
 set -uo pipefail
 
-# Shared /mnt/shared output dirs are accessed from multiple hosts whose local
-# default umask would make files
-# this host creates unwritable from the others. Force group/other-writable.
-umask 000
+# Lab SOP: avoid world-writable files. Group-writable is enough.
+umask 002
 
 # =============================================================================
 # 1. Input and output paths
 # =============================================================================
 
-DATASET_BASE="/mnt/store5/ishana/data/Graceful_data"
-WL_BASE="$DATASET_BASE/workload_runs/"
-
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
+# Graceful_data is looked up under the polaris data folder first, then the
+# older per-user data folder. Override with DATASET_BASE=/path bash run_code.sh.
+DATASET_BASE="${DATASET_BASE:-}"
+if [[ -z "$DATASET_BASE" ]]; then
+    for candidate in \
+        "$SCRIPT_DIR/../data/Graceful_data" \
+        "/mnt/store5/ishana/data/Graceful_data"; do
+        if [[ -d "$candidate/workload_runs" ]]; then
+            DATASET_BASE="$(cd "$candidate" && pwd)"
+            break
+        fi
+    done
+fi
+if [[ ! -d "$DATASET_BASE/workload_runs" ]]; then
+    echo "Graceful_data not found (no workload_runs/ under '${DATASET_BASE:-<none>}'). Set DATASET_BASE=/path/to/Graceful_data." >&2
+    exit 2
+fi
+WL_BASE="$DATASET_BASE/workload_runs/"
 
 MODELS_OUT="$SCRIPT_DIR/saved/models"
 LOG_DIR="$SCRIPT_DIR/saved/training_logs"
@@ -61,6 +84,7 @@ REPEAT_SUMMARY_SCRIPT="$SCRIPT_DIR/summarize_repeated_runs.py"
 BASELINE_RESULTS_SCRIPT="$SCRIPT_DIR/update_baseline_cost_estimation.py"
 AUGMENTED_RESULTS_SCRIPT="$SCRIPT_DIR/update_augmented_cost_estimation.py"
 AUGMENTED_PLOT_SCRIPT="$SCRIPT_DIR/plot_augmented_cost_estimation.py"
+LOSS_CURVE_SCRIPT="$SCRIPT_DIR/plot_loss_curves.py"
 
 # =============================================================================
 # 2. Runtime and reproducibility
@@ -68,9 +92,42 @@ AUGMENTED_PLOT_SCRIPT="$SCRIPT_DIR/plot_augmented_cost_estimation.py"
 
 N_RUNS=1                 #? Number of sequential repetitions; all repetitions use SEED below.
 SEED=42
-DEVICE="${DEVICE:-0}"
-CUDA_DEVICE="cuda:${DEVICE}"  #? Any integer, e.g. 0, 1, 2, 42. (override via env, e.g. DEVICE=1 bash run_code.sh)
 DETERMINISTIC=True       #? True, False
+
+GPU_UUID="${GPU_UUID:-}"  #? The UUID assigned to you, e.g. GPU-12345678-abcd-4abc-9def-1234567890ab
+
+if [[ -n "${DEVICE:-}" ]]; then
+    echo "DEVICE=$DEVICE is no longer supported: GPUs must be selected by UUID (GPU_UUID=GPU-...)." >&2
+    exit 2
+fi
+
+if [[ -n "${SLURM_JOB_ID:-}" ]]; then
+    # Slurm already restricted CUDA_VISIBLE_DEVICES to this job's GPU(s).
+    if [[ -n "$GPU_UUID" ]]; then
+        echo "Inside Slurm job $SLURM_JOB_ID: do not set GPU_UUID, the Slurm GPU allocation is used." >&2
+        exit 2
+    fi
+    if [[ -z "${CUDA_VISIBLE_DEVICES:-}" ]]; then
+        echo "Slurm job $SLURM_JOB_ID has no GPU allocated (request one with --gres=gpu:1)." >&2
+        exit 2
+    fi
+    GPU_SOURCE="slurm job $SLURM_JOB_ID"
+else
+    uuid_re='^GPU-[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$'
+    if ! [[ "$GPU_UUID" =~ $uuid_re ]]; then
+        echo "GPU_UUID must be the full UUID of your assigned GPU (see \`nvidia-smi -L\`), got: '${GPU_UUID}'" >&2
+        exit 2
+    fi
+    # Query only this UUID (no enumeration) so a UUID from another server fails fast.
+    if ! gpu_name="$(nvidia-smi -i "$GPU_UUID" --query-gpu=name --format=csv,noheader 2>/dev/null)"; then
+        echo "GPU $GPU_UUID does not exist on $(hostname) -- is this the right server?" >&2
+        exit 2
+    fi
+    export CUDA_VISIBLE_DEVICES="$GPU_UUID"
+    GPU_SOURCE="GPU_UUID, $gpu_name on $(hostname)"
+fi
+# Only the assigned GPU is visible, so it is always local device 0.
+CUDA_DEVICE="cuda:0"
 
 # =============================================================================
 # 3. Model and training data
@@ -127,12 +184,27 @@ mkdir -p "$MODELS_OUT" "$LOG_DIR" "$SUMMARY_DIR"
 cd "$SCRIPT_DIR"
 
 export PYTHONPATH="$SCRIPT_DIR:${PYTHONPATH:-}"
-export LD_LIBRARY_PATH="/usr/local/cuda-11.8/targets/x86_64-linux/lib:${LD_LIBRARY_PATH:-}"
 # Python hash randomization and cuBLAS must be configured before Python/CUDA start.
 export PYTHONHASHSEED="$SEED"
 export CUBLAS_WORKSPACE_CONFIG=:4096:8
 
-# source polaris/bin/activate
+# Activate the project conda env unless it is already active (CONDA_ENV=... to change).
+CONDA_ENV="${CONDA_ENV:-/mnt/store5/ishana/tools/envs/graceful}"
+if [[ "${CONDA_DEFAULT_ENV:-}" != "$CONDA_ENV" ]]; then
+    CONDA_BASE="$(conda info --base 2>/dev/null || echo "$HOME/miniconda3")"
+    # shellcheck disable=SC1091
+    source "$CONDA_BASE/etc/profile.d/conda.sh" && conda activate "$CONDA_ENV" || {
+        echo "Could not activate conda env '$CONDA_ENV' (conda base: $CONDA_BASE)." >&2
+        exit 2
+    }
+fi
+
+# Fail fast if the active Python env is missing the training dependencies.
+# (Import only -- this does not initialise CUDA.)
+if ! python -c "import torch, dgl" 2>/dev/null; then
+    echo "Active python ($(command -v python)) cannot import torch/dgl -- activate the project env first." >&2
+    exit 2
+fi
 
 if ! [[ "$N_RUNS" =~ ^[1-9][0-9]*$ ]]; then
     echo "N_RUNS must be a positive integer, got: $N_RUNS" >&2
@@ -159,7 +231,8 @@ append_summary() {
             --run-variable "WL_BASE=$WL_BASE" \
             --run-variable "MODELS_OUT=$MODELS_OUT" \
             --run-variable "N_RUNS=$N_RUNS" \
-            --run-variable "DEVICE=$DEVICE" \
+            --run-variable "GPU_UUID=$GPU_UUID" \
+            --run-variable "CUDA_VISIBLE_DEVICES=$CUDA_VISIBLE_DEVICES" \
             --run-variable "CUDA_DEVICE=$CUDA_DEVICE" \
             --run-variable "SEED=$SEED" \
             --run-variable "DETERMINISTIC=$DETERMINISTIC" \
@@ -274,7 +347,7 @@ for CARDINALITY_TYPE in "${CARDINALITY_TYPE_LIST[@]}"; do
         echo "Workload base: $WL_BASE" | tee_log
         echo "Models output: $MODELS_OUT" | tee_log
 
-        echo "CUDA device: $CUDA_DEVICE" | tee_log
+        echo "GPU ($GPU_SOURCE): CUDA_VISIBLE_DEVICES=$CUDA_VISIBLE_DEVICES -> $CUDA_DEVICE" | tee_log
         echo "Seed: $SEED" | tee_log
         echo "Deterministic: $DETERMINISTIC" | tee_log
         echo "Python hash seed: $PYTHONHASHSEED" | tee_log
@@ -325,7 +398,7 @@ for CARDINALITY_TYPE in "${CARDINALITY_TYPE_LIST[@]}"; do
                 python "$LOSS_CURVE_SCRIPT" \
                     --csv "$stats_csv_path" \
                     --test-db "$TEST_DB" \
-                    --time-stamp "$GROUP_RUN_TIME" \
+                    --time-stamp "${GROUP_RUN_TIME}_run${run_number}" \
                     --output-dir "$AUGMENTED_PLOT_DIR" \
                     --seed "$SEED" \
                     --cardinality "$CARDINALITY_TYPE" \

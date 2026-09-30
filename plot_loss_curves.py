@@ -73,6 +73,14 @@ def parse_args() -> argparse.Namespace:
 def safe_filename_part(value: str) -> str:
     return re.sub(r"[^A-Za-z0-9_.-]+", "-", value).strip("-_") or "unknown"
 
+def unused_path(path: Path) -> Path:
+    """Return path, or path with a _2/_3/... suffix if it already exists, so plots are never overwritten."""
+    candidate, n = path, 2
+    while candidate.exists():
+        candidate = path.with_name(f"{path.stem}_{n}{path.suffix}")
+        n += 1
+    return candidate
+
 
 def format_settings(args: argparse.Namespace) -> str:
     settings = f"SEED={args.seed} | CARDINALITY={args.cardinality} | AUGMENT={args.augment}"
@@ -157,7 +165,7 @@ def create_plot(csv_path: str, test_db: str, time_stamp: str, output_dir: str, a
 
     out_dir = Path(output_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
-    output_path = out_dir / f"{safe_filename_part(test_db)}_{safe_filename_part(time_stamp)}_loss.png"
+    output_path = unused_path(out_dir / f"{safe_filename_part(test_db)}_{safe_filename_part(time_stamp)}_loss.png")
     figure.savefig(output_path, dpi=300, bbox_inches="tight", facecolor="white")
     plt.close(figure)
     return output_path

@@ -160,6 +160,14 @@ def label_bars(axis, bars, values) -> None:
 def safe_filename_part(value: str) -> str:
     return re.sub(r"[^A-Za-z0-9_.-]+", "-", value).strip("-_") or "unknown"
 
+def unused_path(path: Path) -> Path:
+    """Return path, or path with a _2/_3/... suffix if it already exists, so plots are never overwritten."""
+    candidate, n = path, 2
+    while candidate.exists():
+        candidate = path.with_name(f"{path.stem}_{n}{path.suffix}")
+        n += 1
+    return candidate
+
 
 def format_settings(args: argparse.Namespace, baseline_epochs: Optional[float] = None) -> str:
     epochs_label = f"EPOCHS={args.epochs}"
@@ -247,9 +255,9 @@ def create_plot(
 
     output_dir = Path(args.output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
-    output_path = output_dir / (
+    output_path = unused_path(output_dir / (
         f"{safe_filename_part(args.test_db)}_{safe_filename_part(args.time_stamp)}.png"
-    )
+    ))
     figure.savefig(output_path, dpi=300, bbox_inches="tight", facecolor="white")
     plt.close(figure)
     return output_path

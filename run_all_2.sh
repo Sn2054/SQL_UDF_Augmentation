@@ -7,7 +7,7 @@
 # Each job runs run_code.sh once, so a job with CARDINALITY_TYPES="est act dd wj"
 # already loops over all four inside that single run_code.sh call.
 #
-# Jobs run SEQUENTIALLY on purpose, even across different DEVICE values --
+# Jobs run SEQUENTIALLY on purpose, even across different GPU_UUID values --
 # this avoids racing on the shared results/*.xlsx files (they're not
 # lock-protected, so two run_code.sh processes finishing at the same moment
 # can silently clobber each other's row). If you want true parallelism across
@@ -17,12 +17,19 @@
 #
 # Usage:
 #   tmux new -s all_runs
-#   bash run_all.sh
+#   GPU_UUID=GPU-... bash run_all_2.sh      # or fill in GPU_UUID below
 
 set -uo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 RUN_SCRIPT="$SCRIPT_DIR/run_code.sh"
+
+# UUID of the GPU assigned to you (`nvidia-smi -L`), per the lab server manual.
+# Never a GPU index. A single job can still override it with GPU_UUID=... in
+# its entry below. Leave empty when running inside a Slurm allocation.
+if [[ -z "${SLURM_JOB_ID:-}" ]]; then
+    export GPU_UUID="${GPU_UUID:-GPU-452b1bc7-d479-c54a-050e-e27eabf2d1de}"  # GPU 6
+fi
 
 # -----------------------------------------------------------------------
 # Edit this list. Each entry is a set of VAR=value overrides for
@@ -31,7 +38,7 @@ RUN_SCRIPT="$SCRIPT_DIR/run_code.sh"
 # summary printout below.
 # -----------------------------------------------------------------------
 JOBS=(
-    "basketball3 TEST_DB=basketball DEVICE=1 AUGMENT_POOLING=max CARDINALITY_TYPES=act EPOCHS=100 LAMBDA_STRUCT=0.1 AUGMENT_COARSE_LAYERS=1 AUGMENT_REFINEMENT=residual_sum"
+    "basketball3 TEST_DB=basketball AUGMENT_POOLING=max CARDINALITY_TYPES=act EPOCHS=100 LAMBDA_STRUCT=0.1 AUGMENT_COARSE_LAYERS=1 AUGMENT_REFINEMENT=residual_sum"
     # "cons-sum TEST_DB=consumer AUGMENT_POOLING=sum"
     # "cons-mean TEST_DB=consumer AUGMENT_POOLING=mean"
     # "cons-max TEST_DB=consumer AUGMENT_POOLING=max"

@@ -73,7 +73,7 @@ def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
 
     parser.add_argument('--test_db', required=True)
-    parser.add_argument('--wl_base_path', default='/mnt/shared/data/dataset/Graceful_data/workload_runs/')
+    parser.add_argument('--wl_base_path', default='/mnt/store5/ishana/data/Graceful_data/workload_runs/')
     parser.add_argument('--pushdown_plans_path', default=None)
     parser.add_argument('--pullup_plans_path', default=None)
     parser.add_argument('--statistics_file', default=None)
@@ -149,13 +149,13 @@ def capture_refinement(model, config: dict, plan, plans_path: str, statistics_fi
     original_coarse_mp = augmentor._coarse_message_passing
     original_feat_list_fn = dd_plan_batching.create_udf_feat_list
 
-    def patched_extract_regions(graph):
-        regions, region_members = original_extract_regions(graph)
+    def patched_extract_regions(graph, *args, **kwargs):
+        regions, region_members = original_extract_regions(graph, *args, **kwargs)
         captured['regions'] = regions
         return regions, region_members
 
-    def patched_coarse_mp(region_embeddings, region_members):
-        result = original_coarse_mp(region_embeddings, region_members)
+    def patched_coarse_mp(region_embeddings, region_members, *args, **kwargs):
+        result = original_coarse_mp(region_embeddings, region_members, *args, **kwargs)
         captured['region_members'] = region_members
         captured['region_embeddings_before_mp'] = region_embeddings.detach().clone()
         captured['region_embeddings'] = result.detach().clone()
