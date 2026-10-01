@@ -53,13 +53,13 @@ umask 002
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
-# Graceful_data is looked up under the polaris data folder first, then the
-# older per-user data folder. Override with DATASET_BASE=/path bash run_code.sh.
+# Graceful_data is looked up under <store>/<user>/polaris/data first, then
+# <store>/<user>/data, so it works on any server/store. Override with DATASET_BASE=/path.
 DATASET_BASE="${DATASET_BASE:-}"
 if [[ -z "$DATASET_BASE" ]]; then
     for candidate in \
         "$SCRIPT_DIR/../data/Graceful_data" \
-        "/mnt/store5/ishana/data/Graceful_data"; do
+        "$SCRIPT_DIR/../../data/Graceful_data"; do
         if [[ -d "$candidate/workload_runs" ]]; then
             DATASET_BASE="$(cd "$candidate" && pwd)"
             break
@@ -188,19 +188,8 @@ export PYTHONPATH="$SCRIPT_DIR:${PYTHONPATH:-}"
 export PYTHONHASHSEED="$SEED"
 export CUBLAS_WORKSPACE_CONFIG=:4096:8
 
-# Activate the project conda env unless it is already active (CONDA_ENV=... to change).
-CONDA_ENV="${CONDA_ENV:-/mnt/store5/ishana/tools/envs/graceful}"
-if [[ "${CONDA_DEFAULT_ENV:-}" != "$CONDA_ENV" ]]; then
-    CONDA_BASE="$(conda info --base 2>/dev/null || echo "$HOME/miniconda3")"
-    # shellcheck disable=SC1091
-    source "$CONDA_BASE/etc/profile.d/conda.sh" && conda activate "$CONDA_ENV" || {
-        echo "Could not activate conda env '$CONDA_ENV' (conda base: $CONDA_BASE)." >&2
-        exit 2
-    }
-fi
-
-# Fail fast if the active Python env is missing the training dependencies.
-# (Import only -- this does not initialise CUDA.)
+# The Python env is activated manually before launching (e.g. conda activate graceful).
+# Fail fast if it is missing the training dependencies. (Import only -- no CUDA init.)
 if ! python -c "import torch, dgl" 2>/dev/null; then
     echo "Active python ($(command -v python)) cannot import torch/dgl -- activate the project env first." >&2
     exit 2

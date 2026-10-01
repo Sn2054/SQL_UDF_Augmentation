@@ -22,7 +22,7 @@ fi
 # Same lookup order as run_code.sh; override with DATASET_BASE=/path.
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 if [[ -z "${DATASET_BASE:-}" ]]; then
-    for candidate in "$SCRIPT_DIR/../data/Graceful_data" "/mnt/store5/ishana/data/Graceful_data"; do
+    for candidate in "$SCRIPT_DIR/../data/Graceful_data" "$SCRIPT_DIR/../../data/Graceful_data"; do
         [[ -d "$candidate/workload_runs" ]] && { DATASET_BASE="$candidate"; break; }
     done
 fi
