@@ -68,10 +68,10 @@ LOSS_CURVE_SCRIPT="$SCRIPT_DIR/plot_loss_curves.py"
 # =============================================================================
 
 N_RUNS=1                 #? Number of sequential repetitions; all repetitions use SEED below.
-SEED=42 
+SEED="${SEED:-42}"
 DEVICE="${DEVICE:-0}"
 CUDA_DEVICE="cuda:${DEVICE:-0}"  #? Any integer, e.g. 0, 1, 2, 42.
-GPU_UUID="${GPU_UUID:-}"  #? e.g. GPU-042f3a36-...; overrides DEVICE. Pins the run to that physical GPU via CUDA_VISIBLE_DEVICES (index order can differ between nvidia-smi and CUDA, and across reboots; the UUID can't).
+GPU_UUID="${GPU_UUID:-}"  #? e.g. GPU-042f3a36-...; overrides DEVICE.
 if [[ -n "$GPU_UUID" ]]; then
     export CUDA_VISIBLE_DEVICES="$GPU_UUID"
     DEVICE="$GPU_UUID"

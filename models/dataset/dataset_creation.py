@@ -1,3 +1,4 @@
+import atexit
 import functools
 import json
 import os.path
@@ -31,6 +32,7 @@ def seed_dataloader_worker(worker_id):
     worker_seed = torch.initial_seed() % 2 ** 32
     np.random.seed(worker_seed)
     random.seed(worker_seed)
+    atexit.register(os._exit, 0)
 
 
 def read_workload_runs(workload_run_paths, min_runtime_ms: int, limit_queries=None, limit_queries_affected_wl=None,
@@ -590,6 +592,8 @@ def create_dataloader(workload_run_paths, test_workload_run_paths: Optional[List
     dataloader_args = dict(batch_size=batch_size, shuffle=shuffle, num_workers=num_workers, collate_fn=train_collate_fn,
                            pin_memory=pin_memory, worker_init_fn=seed_dataloader_worker,
                            generator=dataloader_generator)
+    if num_workers > 0:
+        dataloader_args.update(multiprocessing_context='spawn', persistent_workers=True)
     if train_dataset is None or len(train_dataset) == 0:
         train_loader = None
         val_loader = None
