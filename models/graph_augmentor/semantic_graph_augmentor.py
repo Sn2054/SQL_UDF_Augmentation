@@ -9,6 +9,7 @@ import torch.nn.functional as F
 
 UDF_NODE_TYPES = ("INV", "COMP", "BRANCH", "LOOP", "LOOPEND", "RET")
 DEFAULT_REFINED_NODE_TYPES = ("COMP", "BRANCH", "LOOP", "LOOPEND", "RET")
+REGION_KINDS = ("LOOP", "BRANCH", "SEQ")
 
 
 class SemanticGraphAugmentor(nn.Module):
@@ -19,7 +20,9 @@ class SemanticGraphAugmentor(nn.Module):
             refinement: str = "gated_residual",
             coarse_layers: int = 1,
             include_inv: bool = False,
-            refine_ret: bool = True):
+            refine_ret: bool = True,
+            seq_regions: bool = False,
+            cfg_coarse_edges: bool = False):
         super().__init__()
         valid_pooling = {"mean", "sum", "max", "weighted_mean", "attention", "hybrid"}
         valid_refinement = {"residual_sum", "gated_residual"}
@@ -34,8 +37,14 @@ class SemanticGraphAugmentor(nn.Module):
         self.coarse_layers = coarse_layers
         self.include_inv = include_inv
         self.refine_ret = refine_ret
+        self.seq_regions = seq_regions
+        self.cfg_coarse_edges = cfg_coarse_edges
 
         self.attention_score = nn.Linear(hidden_dim, 1)
+        if seq_regions:
+            #? Pooling weights are shared across LOOP/BRANCH/SEQ supernodes; this tells them apart.
+            #? Only created when enabled so checkpoints trained without SEQ regions still load.
+            self.region_kind_embedding = nn.Embedding(len(REGION_KINDS), hidden_dim)
         if pooling == "hybrid":
             # Preserve both the region-wide signal and its strongest activations,
             # then restore the hidden size expected by downstream layers.
@@ -53,7 +62,8 @@ class SemanticGraphAugmentor(nn.Module):
     def forward(self, graph, feat_dict: Dict[str, torch.Tensor]) -> Dict[str, torch.Tensor]:
         #? The augmentor only enriches encoded UDF node embeddings and leaves the original graph unchanged.
         self.last_coarse_fine_loss = None
-        regions, region_members = self._extract_regions(graph)
+        control_flow_graph = self._build_control_flow_graph(graph)
+        regions, region_members = self._extract_regions(graph, control_flow_graph)
         if len(regions) == 0:
             return feat_dict
 
@@ -61,7 +71,7 @@ class SemanticGraphAugmentor(nn.Module):
         if region_embeddings is None:
             return feat_dict
 
-        region_embeddings = self._coarse_message_passing(region_embeddings, region_members)
+        region_embeddings = self._coarse_message_passing(region_embeddings, region_members, control_flow_graph)
         refined = self._refine_nodes(feat_dict, regions, region_members, region_embeddings)
         self.last_coarse_fine_loss = self._coarse_fine_consistency_loss(
             refined,
@@ -69,13 +79,16 @@ class SemanticGraphAugmentor(nn.Module):
             region_embeddings)
         return refined
 
-    def _extract_regions(self, graph) -> Tuple[List[Tuple[str, int]], List[List[Tuple[str, int]]]]:
+    def _extract_regions(
+            self, graph, control_flow_graph: Optional[nx.DiGraph] = None
+    ) -> Tuple[List[Tuple[str, int]], List[List[Tuple[str, int]]]]:
         #? Each region is the full single-entry-single-exit (SESE) body of a LOOP or BRANCH node:
         #? every node forward-dominated by the head, up to its immediate post-dominator (where the
         #? loop body / branch arms reconverge) -- not just its direct one-hop neighbors.
         regions = []
         region_members = []
-        control_flow_graph = self._build_control_flow_graph(graph)
+        if control_flow_graph is None:
+            control_flow_graph = self._build_control_flow_graph(graph)
         if control_flow_graph is None:
             return regions, region_members
 
@@ -92,7 +105,22 @@ class SemanticGraphAugmentor(nn.Module):
                 if len(members) > 1:
                     regions.append((region_type, region_node_id))
                     region_members.append(sorted(members))
+
+        if self.seq_regions:
+            covered = {member for members in region_members for member in members}
+            for segment_idx, segment in enumerate(self._extract_sequence_regions(control_flow_graph, covered)):
+                regions.append(("SEQ", segment_idx))
+                region_members.append(segment)
         return regions, region_members
+
+    def _extract_sequence_regions(self, control_flow_graph: nx.DiGraph, covered) -> List[List[Tuple[str, int]]]:
+        #? Nodes outside every LOOP/BRANCH region are the "block/sequence" regions of structural
+        #? CFG analysis. Region members (incl. LOOPEND/join boundaries) act as separators, so each
+        #? maximal straight-line run between, before or after constructs becomes its own component.
+        uncovered = [node for node in control_flow_graph if node not in covered]
+        segments = [sorted(component) for component in
+                    nx.weakly_connected_components(control_flow_graph.subgraph(uncovered))]
+        return sorted(segments)
 
     def _build_control_flow_graph(self, graph) -> Optional[nx.DiGraph]:
         #? Flatten the heterogeneous UDF node types into a single control-flow graph so region
@@ -210,7 +238,7 @@ class SemanticGraphAugmentor(nn.Module):
     def _coarsen_regions(self, graph, feat_dict, regions, region_members):
         #? Coarsening pools heterogeneous UDF node embeddings because all encoders emit the same hidden dimension.
         pooled_regions = []
-        for members in region_members:
+        for (region_kind, _), members in zip(regions, region_members):
             member_embeddings = []
             member_weights = []
             for node_type, node_id in members:
@@ -224,7 +252,11 @@ class SemanticGraphAugmentor(nn.Module):
 
             stacked = torch.stack(member_embeddings, dim=0)
             weights = torch.stack(member_weights, dim=0).to(stacked.device).reshape(-1, 1)
-            pooled_regions.append(self._pool_members(stacked, weights))
+            pooled = self._pool_members(stacked, weights)
+            if self.seq_regions:
+                kind_idx = torch.tensor(REGION_KINDS.index(region_kind), device=pooled.device)
+                pooled = pooled + self.region_kind_embedding(kind_idx)
+            pooled_regions.append(pooled)
 
         if len(pooled_regions) != len(regions):
             return None
@@ -259,23 +291,13 @@ class SemanticGraphAugmentor(nn.Module):
             return self.hybrid_projection(torch.cat([mean_pooled, max_pooled], dim=-1))
         raise ValueError(f"Unknown augment pooling {self.pooling}")
 
-    def _coarse_message_passing(self, region_embeddings: torch.Tensor, region_members) -> torch.Tensor:
-        #? Coarse message passing connects regions that overlap through at least one fine UDF node.
+    def _coarse_message_passing(
+            self, region_embeddings: torch.Tensor, region_members,
+            control_flow_graph: Optional[nx.DiGraph] = None) -> torch.Tensor:
         if self.coarse_layers <= 0 or region_embeddings.shape[0] <= 1:
             return region_embeddings
 
-        shared_member_regions = defaultdict(list)
-        for region_idx, members in enumerate(region_members):
-            for member in members:
-                shared_member_regions[member].append(region_idx)
-
-        neighbors = [set() for _ in range(len(region_members))]
-        for region_ids in shared_member_regions.values():
-            for src_id in region_ids:
-                for dst_id in region_ids:
-                    if src_id != dst_id:
-                        neighbors[dst_id].add(src_id)
-
+        neighbors = self._region_neighbors(region_members, control_flow_graph)
         hidden = region_embeddings
         for _ in range(self.coarse_layers):
             messages = []
@@ -288,6 +310,31 @@ class SemanticGraphAugmentor(nn.Module):
             message_tensor = torch.stack(messages, dim=0)
             hidden = self.layer_norm(hidden + self.coarse_update(torch.cat([hidden, message_tensor], dim=-1)))
         return hidden
+
+    def _region_neighbors(self, region_members, control_flow_graph: Optional[nx.DiGraph] = None) -> List[Set[int]]:
+        #? Regions are connected when they overlap through at least one fine UDF node (S^T S).
+        shared_member_regions = defaultdict(list)
+        for region_idx, members in enumerate(region_members):
+            for member in members:
+                shared_member_regions[member].append(region_idx)
+
+        neighbors = [set() for _ in range(len(region_members))]
+        for region_ids in shared_member_regions.values():
+            for src_id in region_ids:
+                for dst_id in region_ids:
+                    if src_id != dst_id:
+                        neighbors[dst_id].add(src_id)
+
+        if self.cfg_coarse_edges and control_flow_graph is not None:
+            #? SESE regions that run one after another share no members, so overlap alone only yields
+            #? nesting edges. Also link regions joined by a CFG edge (the S^T A S term of coarsening).
+            for src_node, dst_node in control_flow_graph.edges:
+                for src_id in shared_member_regions.get(src_node, ()):
+                    for dst_id in shared_member_regions.get(dst_node, ()):
+                        if src_id != dst_id:
+                            neighbors[dst_id].add(src_id)
+                            neighbors[src_id].add(dst_id)
+        return neighbors
 
     def _refine_nodes(self, feat_dict, regions, region_members, region_embeddings):
         #? Refinement writes the coarse context back into the original UDF node tensors without changing shapes.

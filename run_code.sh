@@ -190,8 +190,9 @@ export CUBLAS_WORKSPACE_CONFIG=:4096:8
 
 # The Python env is activated manually before launching (e.g. conda activate graceful).
 # Fail fast if it is missing the training dependencies. (Import only -- no CUDA init.)
-if ! python -c "import torch, dgl" 2>/dev/null; then
-    echo "Active python ($(command -v python)) cannot import torch/dgl -- activate the project env first." >&2
+if ! import_error="$(python -c "import torch, dgl" 2>&1)"; then
+    echo "Active python ($(command -v python)) cannot import torch/dgl -- activate the project env first:" >&2
+    echo "$import_error" | tail -3 >&2
     exit 2
 fi
 

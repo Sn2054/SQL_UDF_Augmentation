@@ -60,6 +60,8 @@ if __name__ == '__main__':
     parser.add_argument('--augment_coarse_layers', type=int, default=argparse.SUPPRESS)
     parser.add_argument('--augment_include_inv', type=str2bool, default=argparse.SUPPRESS)
     parser.add_argument('--augment_refine_ret', type=str2bool, default=argparse.SUPPRESS)
+    parser.add_argument('--augment_seq_regions', type=str2bool, default=argparse.SUPPRESS)
+    parser.add_argument('--augment_cfg_coarse_edges', type=str2bool, default=argparse.SUPPRESS)
     ###
     # End Args
     ###
@@ -115,6 +117,10 @@ if __name__ == '__main__':
         args_config['augment_include_inv'] = args.augment_include_inv
     if hasattr(args, 'augment_refine_ret'):
         args_config['augment_refine_ret'] = args.augment_refine_ret
+    if hasattr(args, 'augment_seq_regions'):
+        args_config['augment_seq_regions'] = args.augment_seq_regions
+    if hasattr(args, 'augment_cfg_coarse_edges'):
+        args_config['augment_cfg_coarse_edges'] = args.augment_cfg_coarse_edges
 
     orig_args_config = args_config.copy()
     config, _, _, _, _ = get_config(args_config, wl_base_path='', assemble_filenames=False)
@@ -178,7 +184,9 @@ if __name__ == '__main__':
                                        augment_refinement=config['augment_refinement'],
                                        augment_coarse_layers=config['augment_coarse_layers'],
                                        augment_include_inv=config['augment_include_inv'],
-                                       augment_refine_ret=config['augment_refine_ret'])
+                                       augment_refine_ret=config['augment_refine_ret'],
+                                       augment_seq_regions=config['augment_seq_regions'],
+                                       augment_cfg_coarse_edges=config['augment_cfg_coarse_edges'])
 
     # move to gpu
     model = model.to(model.device)

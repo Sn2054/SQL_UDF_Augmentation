@@ -26,7 +26,9 @@ class ZeroShotModel(FcOutModel):
                  augment_refinement: str = "gated_residual",
                  augment_coarse_layers: int = 1,
                  augment_include_inv: bool = False,
-                 augment_refine_ret: bool = True):
+                 augment_refine_ret: bool = True,
+                 augment_seq_regions: bool = False,
+                 augment_cfg_coarse_edges: bool = False):
 
         super().__init__(output_dim=output_dim, final_out_layer=True, **final_mlp_kwargs)
 
@@ -73,7 +75,9 @@ class ZeroShotModel(FcOutModel):
                 refinement=augment_refinement,
                 coarse_layers=augment_coarse_layers,
                 include_inv=augment_include_inv,
-                refine_ret=augment_refine_ret)
+                refine_ret=augment_refine_ret,
+                seq_regions=augment_seq_regions,
+                cfg_coarse_edges=augment_cfg_coarse_edges)
         else:
             self.graph_augmentor = None
         self.augmentation_enabled = self.graph_augmentor is not None
