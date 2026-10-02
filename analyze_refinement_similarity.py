@@ -19,6 +19,12 @@ per forward as `feat_dict = self.graph_augmentor(g, feat_dict)`), then running i
 at a time -- so the hook's captured before/after tensors are unambiguously about a single query's
 graph, not a batch mixing several queries' nodes together.
 
+Output is one .xlsx workbook: a `worst_best` sheet holding the input queries table verbatim, plus
+one sheet per query (`worst_1`, `worst_2`, ..., `best_1`, `best_2`, ...) holding that query's
+per-node cosine-similarity/refinement detail -- a query with no LOOP/BRANCH region (nothing for the
+augmentor to touch) simply has no sheet, leaving a gap in the numbering rather than a renumbered
+stand-in for it.
+
 Usage (reading the worst/best CSV find_worst_queries.py already wrote):
 
     python analyze_refinement_similarity.py \\
@@ -47,7 +53,7 @@ import torch.nn.functional as F
 import models.dataset.plan_graph_batching.dd_plan_batching as dd_plan_batching
 from find_worst_queries import (
     UDF_NAME_PATTERN, build_config, load_model, load_udf_source, resolve_model_name, run_query_inference,
-    safe_filename_part, str2bool,
+    run_stamp, safe_filename_part, str2bool,
 )
 from models.dataset.dataset_creation import read_workload_runs
 from cross_db_benchmark.benchmark_tools.utils import load_json
@@ -67,7 +73,7 @@ def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
 
     parser.add_argument('--test_db', required=True)
-    parser.add_argument('--wl_base_path', default='/mnt/shared/data/dataset/Graceful_data/workload_runs/')
+    parser.add_argument('--wl_base_path', default='/mnt/store3/ishana/data/Graceful_data/workload_runs/')
     parser.add_argument('--pushdown_plans_path', default=None)
     parser.add_argument('--pullup_plans_path', default=None)
     parser.add_argument('--statistics_file', default=None)
@@ -107,8 +113,14 @@ def find_matching_plan(plans, sql: str):
 
 def capture_refinement(model, config: dict, plan, plans_path: str, statistics_file: str,
                        feature_statistics: dict, card_type: str, card_est_udf_sel: Optional[int]):
-    """Besides the augmentor's own before/after feat_dicts, also intercept two more things during
+    """Besides the augmentor's own before/after feat_dicts, also intercept three more things during
     the same single-query inference call:
+
+    - _extract_regions -- the super-node construction step, run once at the top of forward() --
+      to recover `regions`: the (region_type, region_node_id) anchor identity (e.g. ("LOOP", 3))
+      for each entry in `region_members`, positionally aligned with it. Without this there would be
+      no way to label which concrete LOOP/BRANCH super-node a member node was pulled into -- only
+      that it belongs to "region index 3".
 
     - _coarse_message_passing -- the last step before _refine_nodes -- to recover its two inputs
       (region_embeddings: each region's raw pooled embedding, straight out of --augment_pooling,
@@ -133,11 +145,17 @@ def capture_refinement(model, config: dict, plan, plans_path: str, statistics_fi
     augmentor = model.graph_augmentor
     captured: Dict[str, object] = {}
     node_source_by_type: Dict[str, list] = {}
+    original_extract_regions = augmentor._extract_regions
     original_coarse_mp = augmentor._coarse_message_passing
     original_feat_list_fn = dd_plan_batching.create_udf_feat_list
 
-    def patched_coarse_mp(region_embeddings, region_members):
-        result = original_coarse_mp(region_embeddings, region_members)
+    def patched_extract_regions(graph, *args, **kwargs):
+        regions, region_members = original_extract_regions(graph, *args, **kwargs)
+        captured['regions'] = regions
+        return regions, region_members
+
+    def patched_coarse_mp(region_embeddings, region_members, *args, **kwargs):
+        result = original_coarse_mp(region_embeddings, region_members, *args, **kwargs)
         captured['region_members'] = region_members
         captured['region_embeddings_before_mp'] = region_embeddings.detach().clone()
         captured['region_embeddings'] = result.detach().clone()
@@ -153,7 +171,15 @@ def capture_refinement(model, config: dict, plan, plans_path: str, statistics_fi
             # -- one per library call (lib_onehot), plus one more for whatever combines their
             # results (ops), so e.g. `numpy.mod(a,b)-numpy.power(c,d)` becomes 3 distinct nodes all
             # sharing the same lineno. lib_onehot/ops/cmops are what actually tell those apart.
+            #
+            # `src` is create_graph.py's own monotonically-increasing `counter` -- the id it gave
+            # this node in the order it walked the CFG to build the graph. INVOCATION/RETURN/
+            # LOOP_END nodes are structural (they don't come from one specific AST statement) so
+            # they never get a `lineno`; `src` is what lets the sheet order them correctly anyway
+            # (INVOCATION first, LOOP_END right after its loop body, RETURN last on its path) since
+            # it reflects true control-flow order for every node type, lineno or not.
             node_source_by_type.setdefault(node_type, []).append({
+                'graph_node_id': src,
                 'lineno': node_attrs.get('lineno'),
                 'lib_onehot': node_attrs.get('lib_onehot'),
                 'ops': node_attrs.get('ops'),
@@ -166,6 +192,7 @@ def capture_refinement(model, config: dict, plan, plans_path: str, statistics_fi
         captured['before'] = {k: v.detach().clone() for k, v in feat_dict.items()}
         captured['after'] = {k: v.detach().clone() for k, v in output.items()}
 
+    augmentor._extract_regions = patched_extract_regions
     augmentor._coarse_message_passing = patched_coarse_mp
     dd_plan_batching.create_udf_feat_list = patched_feat_list
     handle = augmentor.register_forward_hook(hook)
@@ -179,6 +206,7 @@ def capture_refinement(model, config: dict, plan, plans_path: str, statistics_fi
                             card_est_udf_sel, num_workers=0, plans_override=[plan])
     finally:
         handle.remove()
+        augmentor._extract_regions = original_extract_regions
         augmentor._coarse_message_passing = original_coarse_mp
         dd_plan_batching.create_udf_feat_list = original_feat_list_fn
 
@@ -186,22 +214,25 @@ def capture_refinement(model, config: dict, plan, plans_path: str, statistics_fi
                   for node_type, attrs_list in node_source_by_type.items()
                   for node_id, attrs in enumerate(attrs_list)}
 
-    return (captured.get('before'), captured.get('after'), captured.get('region_members'),
-            captured.get('region_embeddings_before_mp'), captured.get('region_embeddings'), node_source)
+    return (captured.get('before'), captured.get('after'), captured.get('regions'),
+            captured.get('region_members'), captured.get('region_embeddings_before_mp'),
+            captured.get('region_embeddings'), node_source)
 
 
-def explain_refinement(augmentor, before: dict, region_members, region_embeddings_before_mp,
+def explain_refinement(augmentor, before: dict, regions, region_members, region_embeddings_before_mp,
                        region_embeddings) -> dict:
     """Recompute _refine_nodes's own context/gate/projection math (using the model's real,
     already-trained context_projection/gate layers) per refined node, so the aggregate
     cosine-similarity numbers can be attributed to a concrete cause: how many regions a node
-    belongs to, how wide open its gate was, and how large the injected update was relative to
-    the node's own prior embedding. Also reports how much the *context itself* moved during
-    coarse message-passing (region_embeddings_before_mp -> region_embeddings), averaged over
-    whichever region(s) this node belongs to -- the same averaging _refine_nodes itself does to
-    build `context` in the first place."""
+    belongs to, *which* super-node(s) (e.g. "LOOP_3", the same (region_type, region_node_id)
+    identity _extract_regions assigns each super-node), how wide open its gate was, and how large
+    the injected update was relative to the node's own prior embedding. Also reports how much the
+    *context itself* moved during coarse message-passing (region_embeddings_before_mp ->
+    region_embeddings), averaged over whichever region(s) this node belongs to -- the same
+    averaging _refine_nodes itself does to build `context` in the first place."""
     if region_members is None or region_embeddings is None:
         return {}
+    regions = regions or []
 
     member_regions: Dict[tuple, list] = {}
     for region_idx, members in enumerate(region_members):
@@ -220,10 +251,19 @@ def explain_refinement(augmentor, before: dict, region_members, region_embedding
             injected = gate * projected
 
             context_before_mp = region_embeddings_before_mp[region_idxs].mean(dim=0)
-            context_change_cos = F.cosine_similarity(context_before_mp, context, dim=0)
+            # float64 for the same reason as per_node_cosine below: avoids float32 dot/norm noise
+            # making an unchanged region (e.g. one with no coarse-mp neighbors) read as != 1.0.
+            context_change_cos = F.cosine_similarity(context_before_mp.double(), context.double(), dim=0)
             context_change_delta_norm = (context - context_before_mp).norm()
 
+            # e.g. "LOOP_3" or "LOOP_3;BRANCH_1" when a node sits in more than one super-node's
+            # region -- same (region_type, region_node_id) identity _extract_regions constructed
+            # the super-node from, not just an opaque region index.
+            region_label = ';'.join(f'{regions[idx][0]}_{regions[idx][1]}' for idx in region_idxs
+                                    if idx < len(regions))
+
             details[(node_type, node_id)] = {
+                'region': region_label,
                 'num_regions': len(region_idxs),
                 'gate_mean': gate.mean().item(),
                 'original_norm': original.norm().item(),
@@ -275,7 +315,11 @@ def per_node_cosine(before: dict, after: dict, explain: dict, node_source: dict,
         b, a = before[node_type], after[node_type]
         if b.shape != a.shape:
             continue
-        cosine = F.cosine_similarity(b, a, dim=-1)
+        # Computed in float64: at float32, F.cosine_similarity's own dot-product/norm arithmetic
+        # introduces ~1e-7 noise even for bit-identical vectors (embedding_delta_norm == 0 exactly,
+        # yet cosine came back as e.g. 0.9999998808 or 1.0000001192) -- every untouched node getting
+        # its own slightly-off value made them look inconsistent instead of uniformly unchanged.
+        cosine = F.cosine_similarity(b.double(), a.double(), dim=-1)
         # Cosine similarity only captures direction: a node could be rotated a lot while barely
         # changing size, or rescaled a lot while barely changing direction. This is the raw
         # Euclidean distance between the before/after vectors -- how far the embedding actually
@@ -288,6 +332,7 @@ def per_node_cosine(before: dict, after: dict, explain: dict, node_source: dict,
             row = {
                 'node_type': node_type,
                 'node_id': node_id,
+                'graph_node_id': attrs.get('graph_node_id') if attrs else None,
                 'udf_lineno': lineno,
                 'udf_code_line': resolve_code_line(lineno, udf_source_lines),
                 'udf_node_detail': summarize_node_detail(attrs),
@@ -331,11 +376,23 @@ def main() -> int:
     queries = pd.read_csv(args.queries_csv)
     plans_cache = {}
     udf_source_cache = {}
-    node_frames = []
+    sheets: Dict[str, pd.DataFrame] = {}
+    worst_idx = 0
+    best_idx = 0
     skipped_no_region = 0
     skipped_not_found = 0
 
     for _, row in queries.iterrows():
+        # Sheet names track this query's rank position (worst_1 = the single worst query, ...),
+        # not just "the Nth query we managed to process" -- so a gap (a query skipped below) still
+        # leaves worst_4 meaning the 4th-worst query, never a renumbered stand-in for it.
+        if row['rank_group'] == 'worst':
+            worst_idx += 1
+            sheet_name = f'worst_{worst_idx}'
+        else:
+            best_idx += 1
+            sheet_name = f'best_{best_idx}'
+
         workload = row['workload']
         if workload not in plans_cache:
             plans, _ = read_workload_runs([plans_paths[workload]], min_runtime_ms=config['min_runtime_ms'],
@@ -353,7 +410,7 @@ def main() -> int:
         udf_source_lines = (udf_source_cache[workload].get(udf_name_match.group(0))
                             if udf_name_match else None)
 
-        before, after, region_members, region_embeddings_before_mp, region_embeddings, node_source = \
+        before, after, regions, region_members, region_embeddings_before_mp, region_embeddings, node_source = \
             capture_refinement(model, config, plan, plans_paths[workload], statistics_file, feature_statistics,
                                args.card_type, args.card_est_udf_sel)
         if before is None:
@@ -362,8 +419,8 @@ def main() -> int:
             skipped_no_region += 1
             continue
 
-        explain = explain_refinement(model.graph_augmentor, before, region_members, region_embeddings_before_mp,
-                                     region_embeddings)
+        explain = explain_refinement(model.graph_augmentor, before, regions, region_members,
+                                     region_embeddings_before_mp, region_embeddings)
         node_df = per_node_cosine(before, after, explain, node_source, udf_source_lines)
         if node_df.empty:
             skipped_no_region += 1
@@ -376,33 +433,38 @@ def main() -> int:
         # graph -- i.e. how big a fraction of the query the refinement step touched at all.
         node_df['num_refined_nodes'] = int(node_df['was_refined'].sum())
         node_df['num_graph_nodes'] = len(node_df)
-        # keeps queries in their original (worst-to-best) order after the source-line sort below,
-        # which only reorders rows *within* one query.
-        node_df['_query_order'] = len(node_frames)
-        node_frames.append(node_df)
+        # Sort by graph_node_id (create_graph.py's own node-creation order, which walks the CFG
+        # start to finish) rather than udf_lineno: INVOCATION/RETURN/LOOP_END are structural nodes
+        # with no source line of their own, so sorting by lineno alone stranded all of them at the
+        # bottom together (na_position='last') regardless of where they actually sit in the
+        # function -- INVOCATION always first, RETURN always last, wherever their real position
+        # was. graph_node_id has no such gaps, and it still places a loop's/branch's body -- the
+        # COMP/BRANCH rows already linked to it as a region member -- physically between its LOOP
+        # and LOOPEND rows, same as sorting by line did for nodes that had one.
+        node_df = node_df.sort_values('graph_node_id', na_position='last').reset_index(drop=True)
+        sheets[sheet_name] = node_df
 
     if skipped_not_found:
         print(f'NOTE: {skipped_not_found} queries in {args.queries_csv} had no matching plan (sql text mismatch).')
     if skipped_no_region:
-        print(f'NOTE: {skipped_no_region} queries had no LOOP/BRANCH region for the augmentor to refine.')
+        print(f'NOTE: {skipped_no_region} queries had no LOOP/BRANCH region for the augmentor to refine '
+              f'(no per-query sheet for them).')
 
-    if not node_frames:
+    if not sheets:
         raise SystemExit('No queries produced refinement data; nothing to report.')
-
-    detail = pd.concat(node_frames, ignore_index=True)
-    # Sort by source line within each query so a loop's/branch's body -- COMP/BRANCH rows that are
-    # already linked to it as a region member -- physically lands between its LOOP and LOOPEND
-    # rows, instead of being grouped away under a separate node_type block.
-    detail = detail.sort_values(['_query_order', 'udf_lineno'], na_position='last').drop(columns='_query_order')
-    detail = detail.reset_index(drop=True)
 
     output_dir = Path(args.output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
-    stem = f'{safe_filename_part(args.test_db)}_{safe_filename_part(model_name)}_refinement_similarity'
-    detail_path = output_dir / f'{stem}_per_node.csv'
-    detail.to_csv(detail_path, index=False)
+    stem = f'{safe_filename_part(args.test_db)}_{safe_filename_part(run_stamp(model_name))}_refinement_similarity'
+    xlsx_path = output_dir / f'{stem}.xlsx'
 
-    print(f'\nWrote {len(detail)} per-node rows to {detail_path}')
+    with pd.ExcelWriter(xlsx_path, engine='openpyxl') as writer:
+        queries.to_excel(writer, sheet_name='worst_best', index=False)
+        for sheet_name, node_df in sheets.items():
+            node_df.to_excel(writer, sheet_name=sheet_name, index=False)
+
+    print(f'\nWrote worst_best sheet ({len(queries)} queries) + {len(sheets)} per-query refinement '
+          f'sheets to {xlsx_path}')
 
     return 0
 

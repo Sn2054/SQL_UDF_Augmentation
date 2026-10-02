@@ -220,6 +220,8 @@ if __name__ == '__main__':
     parser.add_argument('--augment_coarse_layers', type=int, default=argparse.SUPPRESS)
     parser.add_argument('--augment_include_inv', type=str2bool, default=argparse.SUPPRESS)
     parser.add_argument('--augment_refine_ret', type=str2bool, default=argparse.SUPPRESS)
+    parser.add_argument('--augment_seq_regions', type=str2bool, default=argparse.SUPPRESS)
+    parser.add_argument('--augment_cfg_coarse_edges', type=str2bool, default=argparse.SUPPRESS)
     parser.add_argument('--lambda_struct', type=float, default=argparse.SUPPRESS)
 
     args = parser.parse_args()
@@ -346,6 +348,10 @@ if __name__ == '__main__':
         args_config['augment_include_inv'] = args.augment_include_inv
     if hasattr(args, 'augment_refine_ret'):
         args_config['augment_refine_ret'] = args.augment_refine_ret
+    if hasattr(args, 'augment_seq_regions'):
+        args_config['augment_seq_regions'] = args.augment_seq_regions
+    if hasattr(args, 'augment_cfg_coarse_edges'):
+        args_config['augment_cfg_coarse_edges'] = args.augment_cfg_coarse_edges
     if hasattr(args, 'lambda_struct'):
         args_config['lambda_struct'] = args.lambda_struct
     if hasattr(args, 'activation_class_name'):

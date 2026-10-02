@@ -147,6 +147,8 @@ def get_config(hyperparams: Dict[str, Any], wl_base_path: str, assemble_filename
         augment_coarse_layers=1,
         augment_include_inv=False,
         augment_refine_ret=True,
+        augment_seq_regions=False,
+        augment_cfg_coarse_edges=False,
         lambda_struct=0.0,
     )
 
@@ -396,6 +398,14 @@ def get_config(hyperparams: Dict[str, Any], wl_base_path: str, assemble_filename
         config['augment_refine_ret'] = hyperparams.pop('augment_refine_ret')
         if config['augment'] and not config['augment_refine_ret']:
             model_name += '_augnoRET'
+    if 'augment_seq_regions' in hyperparams:
+        config['augment_seq_regions'] = hyperparams.pop('augment_seq_regions')
+        if config['augment'] and config['augment_seq_regions']:
+            model_name += '_augseq'
+    if 'augment_cfg_coarse_edges' in hyperparams:
+        config['augment_cfg_coarse_edges'] = hyperparams.pop('augment_cfg_coarse_edges')
+        if config['augment'] and config['augment_cfg_coarse_edges']:
+            model_name += '_augcfge'
     if 'lambda_struct' in hyperparams:
         #? This only affects training loss; base GRACEFUL still uses runtime loss alone when augmentation is off.
         config['lambda_struct'] = hyperparams.pop('lambda_struct')

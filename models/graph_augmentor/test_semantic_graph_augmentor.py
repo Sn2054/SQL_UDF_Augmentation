@@ -1,8 +1,115 @@
 import unittest
 
+import dgl
 import torch
 
 from models.graph_augmentor.semantic_graph_augmentor import SemanticGraphAugmentor
+
+
+def _udf_graph(edges, num_nodes):
+    #? edges: list of ((src_type, src_id), (dst_type, dst_id)), grouped into typed DGL relations.
+    data_dict = {}
+    for (src_type, src_id), (dst_type, dst_id) in edges:
+        data_dict.setdefault((src_type, f"{src_type}_{dst_type}", dst_type), []).append((src_id, dst_id))
+    return dgl.heterograph(data_dict, num_nodes_dict=num_nodes)
+
+
+def _loop_then_branch_graph():
+    # INV0 -> C0 -> LOOP0 -> C1 -> LOOPEND0 -> C2 -> C3 -> BRANCH0 -> {C4 | C5} -> C6 -> C7 -> RET0
+    edges = [
+        (("INV", 0), ("COMP", 0)), (("COMP", 0), ("LOOP", 0)), (("LOOP", 0), ("COMP", 1)),
+        (("COMP", 1), ("LOOPEND", 0)), (("LOOPEND", 0), ("COMP", 2)), (("COMP", 2), ("COMP", 3)),
+        (("COMP", 3), ("BRANCH", 0)), (("BRANCH", 0), ("COMP", 4)), (("BRANCH", 0), ("COMP", 5)),
+        (("COMP", 4), ("COMP", 6)), (("COMP", 5), ("COMP", 6)), (("COMP", 6), ("COMP", 7)),
+        (("COMP", 7), ("RET", 0)),
+    ]
+    return _udf_graph(edges, {"INV": 1, "COMP": 8, "LOOP": 1, "LOOPEND": 1, "BRANCH": 1, "RET": 1})
+
+
+def _sibling_loops_graph(gap_between: bool):
+    # INV0 -> LOOP0 -> C0 -> LOOPEND0 -> [C1 ->] LOOP1 -> C2 -> LOOPEND1 -> RET0
+    edges = [
+        (("INV", 0), ("LOOP", 0)), (("LOOP", 0), ("COMP", 0)), (("COMP", 0), ("LOOPEND", 0)),
+        (("LOOP", 1), ("COMP", 2)), (("COMP", 2), ("LOOPEND", 1)), (("LOOPEND", 1), ("RET", 0)),
+    ]
+    if gap_between:
+        edges += [(("LOOPEND", 0), ("COMP", 1)), (("COMP", 1), ("LOOP", 1))]
+    else:
+        edges += [(("LOOPEND", 0), ("LOOP", 1))]
+    return _udf_graph(edges, {"INV": 1, "COMP": 3, "LOOP": 2, "LOOPEND": 2, "RET": 1})
+
+
+class SemanticGraphAugmentorSequenceRegionTest(unittest.TestCase):
+    def test_seq_regions_cover_prefix_middle_and_tail_gaps(self):
+        augmentor = SemanticGraphAugmentor(hidden_dim=4, seq_regions=True)
+
+        regions, region_members = augmentor._extract_regions(_loop_then_branch_graph())
+
+        by_region = dict(zip(regions, region_members))
+        self.assertEqual(by_region[("LOOP", 0)], [("COMP", 1), ("LOOP", 0), ("LOOPEND", 0)])
+        self.assertEqual(by_region[("BRANCH", 0)], [("BRANCH", 0), ("COMP", 4), ("COMP", 5), ("COMP", 6)])
+        seq_segments = [members for (kind, _), members in zip(regions, region_members) if kind == "SEQ"]
+        self.assertEqual(seq_segments, [
+            [("COMP", 0), ("INV", 0)],
+            [("COMP", 2), ("COMP", 3)],
+            [("COMP", 7), ("RET", 0)],
+        ])
+
+    def test_every_udf_node_is_covered_when_seq_regions_enabled(self):
+        graph = _loop_then_branch_graph()
+        augmentor = SemanticGraphAugmentor(hidden_dim=4, seq_regions=True)
+
+        _, region_members = augmentor._extract_regions(graph)
+
+        covered = {member for members in region_members for member in members}
+        all_nodes = {(ntype, i) for ntype in graph.ntypes for i in range(graph.num_nodes(ntype))}
+        self.assertEqual(covered, all_nodes)
+
+    def test_disabled_flags_keep_only_loop_and_branch_regions(self):
+        augmentor = SemanticGraphAugmentor(hidden_dim=4)
+
+        regions, _ = augmentor._extract_regions(_loop_then_branch_graph())
+
+        self.assertEqual(regions, [("LOOP", 0), ("BRANCH", 0)])
+        self.assertFalse(hasattr(augmentor, "region_kind_embedding"))
+
+    def test_sibling_loops_connect_through_seq_segment_only_with_cfg_edges(self):
+        graph = _sibling_loops_graph(gap_between=True)
+        for cfg_coarse_edges, expect_connected in ((False, False), (True, True)):
+            augmentor = SemanticGraphAugmentor(hidden_dim=4, seq_regions=True, cfg_coarse_edges=cfg_coarse_edges)
+            control_flow_graph = augmentor._build_control_flow_graph(graph)
+            regions, region_members = augmentor._extract_regions(graph, control_flow_graph)
+
+            neighbors = augmentor._region_neighbors(region_members, control_flow_graph)
+
+            loop0, loop1 = regions.index(("LOOP", 0)), regions.index(("LOOP", 1))
+            middle_seq = region_members.index([("COMP", 1)])
+            self.assertEqual(middle_seq in neighbors[loop0] and loop1 in neighbors[middle_seq], expect_connected)
+
+    def test_directly_adjacent_sibling_loops_connect_with_cfg_edges(self):
+        graph = _sibling_loops_graph(gap_between=False)
+        augmentor = SemanticGraphAugmentor(hidden_dim=4, cfg_coarse_edges=True)
+        control_flow_graph = augmentor._build_control_flow_graph(graph)
+        regions, region_members = augmentor._extract_regions(graph, control_flow_graph)
+
+        neighbors = augmentor._region_neighbors(region_members, control_flow_graph)
+
+        self.assertIn(regions.index(("LOOP", 1)), neighbors[regions.index(("LOOP", 0))])
+
+    def test_forward_backward_with_seq_regions_for_all_poolings(self):
+        graph = _loop_then_branch_graph()
+        for pooling in ["mean", "sum", "max", "weighted_mean", "attention", "hybrid"]:
+            augmentor = SemanticGraphAugmentor(
+                hidden_dim=4, pooling=pooling, seq_regions=True, cfg_coarse_edges=True)
+            feat_dict = {ntype: torch.randn(graph.num_nodes(ntype), 4, requires_grad=True)
+                         for ntype in graph.ntypes}
+
+            refined = augmentor(graph, feat_dict)
+            (sum(value.sum() for value in refined.values()) + augmentor.last_coarse_fine_loss).backward()
+
+            self.assertIsNotNone(augmentor.region_kind_embedding.weight.grad)
+            # C2 sits only in a SEQ segment, so it is now refined instead of passing through unchanged.
+            self.assertFalse(torch.equal(refined["COMP"][2], feat_dict["COMP"][2]))
 
 
 class SemanticGraphAugmentorPoolingTest(unittest.TestCase):

@@ -89,7 +89,7 @@ def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
 
     parser.add_argument('--test_db', required=True, help='Held-out test database, e.g. consumer')
-    parser.add_argument('--wl_base_path', default='/mnt/shared/data/dataset/Graceful_data/workload_runs/',
+    parser.add_argument('--wl_base_path', default='/mnt/store3/ishana/data/Graceful_data/workload_runs/',
                         help='Root of duckdb_pushdown / duckdb_pullup workload runs (matches WL_BASE in run_code.sh)')
     parser.add_argument('--pushdown_plans_path', default=None,
                         help='Override: defaults to <wl_base_path>/duckdb_pushdown/parsed_plans/<test_db>/workload.json')
@@ -145,6 +145,9 @@ def parse_args() -> argparse.Namespace:
                              'qerror_delta: queries where augmentation hurt most relative to baseline '
                              '(requires --with_baseline).')
     parser.add_argument('--output_dir', default='results/worst_queries')
+    parser.add_argument('--save_all_queries', type=str2bool, default=False,
+                        help='Also write every scored query (not just worst/best) to a separate '
+                             '_all_queries.csv. Off by default.')
     args = parser.parse_args()
 
     if args.with_baseline and not args.baseline_model_dir:
@@ -265,6 +268,17 @@ def q_error(labels: np.ndarray, preds: np.ndarray) -> np.ndarray:
 
 def safe_filename_part(value: str) -> str:
     return re.sub(r"[^A-Za-z0-9_.-]+", "-", value).strip("-_") or "unknown"
+
+
+RUN_STAMP_PATTERN = re.compile(r'(\d{8}_\d{6}_\d{3})$')
+
+
+def run_stamp(model_name: str) -> str:
+    """The trailing <checkpoint-timestamp>_<run> on a model name, e.g. 20260909_185342_082 out of
+    aug_act_..._cfl0.25_20260909_185342_082 -- matches results/augmented_plots/<db>_<timestamp>.png
+    naming instead of spelling out every hyperparameter keyword in the model name."""
+    match = RUN_STAMP_PATTERN.search(model_name)
+    return match.group(1) if match else model_name
 
 
 UDF_NAME_PATTERN = re.compile(r'func_\d+')
@@ -466,16 +480,18 @@ def main() -> int:
 
     output_dir = Path(args.output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
-    stem = f'{safe_filename_part(args.test_db)}_{safe_filename_part(model_name)}'
-    full_path = output_dir / f'{stem}_all_queries.csv'
+    stem = f'{safe_filename_part(args.test_db)}_{safe_filename_part(run_stamp(model_name))}'
     ranked_stem = f'{stem}_worst{args.top_n}'
     if args.best_n > 0:
         ranked_stem += f'_best{args.best_n}'
     worst_path = output_dir / f'{ranked_stem}.csv'
-    results.to_csv(full_path, index=False)
     worst_and_best.to_csv(worst_path, index=False)
 
-    print(f'\nWrote {len(results)} queries to {full_path}')
+    if args.save_all_queries:
+        full_path = output_dir / f'{stem}_all_queries.csv'
+        results.to_csv(full_path, index=False)
+        print(f'\nWrote {len(results)} queries to {full_path}')
+
     print(f'Wrote worst {len(worst)} + best {len(worst_and_best) - len(worst)} queries '
           f'(ranked by {args.rank_by}) to {worst_path}\n')
 
