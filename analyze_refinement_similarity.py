@@ -73,7 +73,7 @@ def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
 
     parser.add_argument('--test_db', required=True)
-    parser.add_argument('--wl_base_path', default='/mnt/store5/ishana/data/Graceful_data/workload_runs/')
+    parser.add_argument('--wl_base_path', default='/mnt/store3/ishana/data/Graceful_data/workload_runs/')
     parser.add_argument('--pushdown_plans_path', default=None)
     parser.add_argument('--pullup_plans_path', default=None)
     parser.add_argument('--statistics_file', default=None)

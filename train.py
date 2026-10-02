@@ -11,6 +11,9 @@ try:
 except:
     pass
 
+import torch
+
+torch.cuda._device_count_nvml = lambda: -1
 from cross_db_benchmark.benchmark_tools.database import DatabaseSystem
 from models.training.train import train_model
 from utils.hyperparams_utils import get_config
@@ -218,6 +221,9 @@ if __name__ == '__main__':
     parser.add_argument('--lambda_struct', type=float, default=argparse.SUPPRESS)
 
     args = parser.parse_args()
+
+    if args.device.startswith('cuda'):
+        torch.cuda.set_device(args.device)
 
     if args.register_at_wandb or args.wandb_run_sweep:
         wandb_run_data = {
