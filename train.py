@@ -213,7 +213,8 @@ if __name__ == '__main__':
     parser.add_argument('--augment', type=str2bool, default=argparse.SUPPRESS)
     parser.add_argument('--test_augment', type=str2bool, default=argparse.SUPPRESS)
     parser.add_argument('--augment_pooling', choices=['mean', 'sum', 'max', 'weighted_mean', 'attention', 'hybrid',
-                                                     'hybrid_attn_max', 'hybrid_max_wmean', 'hybrid_max_wmean_gated'],
+                                                     'hybrid_attn_max', 'hybrid_max_wmean', 'hybrid_max_wmean_gated',
+                                                     'multi_query_attention'],
                         default=argparse.SUPPRESS)
     parser.add_argument('--augment_refinement', choices=['residual_sum', 'gated_residual'],
                         default=argparse.SUPPRESS)
@@ -222,6 +223,7 @@ if __name__ == '__main__':
     parser.add_argument('--augment_refine_ret', type=str2bool, default=argparse.SUPPRESS)
     parser.add_argument('--augment_seq_regions', type=str2bool, default=argparse.SUPPRESS)
     parser.add_argument('--augment_cfg_coarse_edges', type=str2bool, default=argparse.SUPPRESS)
+    parser.add_argument('--augment_mq_queries', type=int, default=argparse.SUPPRESS)
     parser.add_argument('--lambda_struct', type=float, default=argparse.SUPPRESS)
 
     args = parser.parse_args()
@@ -352,6 +354,8 @@ if __name__ == '__main__':
         args_config['augment_seq_regions'] = args.augment_seq_regions
     if hasattr(args, 'augment_cfg_coarse_edges'):
         args_config['augment_cfg_coarse_edges'] = args.augment_cfg_coarse_edges
+    if hasattr(args, 'augment_mq_queries'):
+        args_config['augment_mq_queries'] = args.augment_mq_queries
     if hasattr(args, 'lambda_struct'):
         args_config['lambda_struct'] = args.lambda_struct
     if hasattr(args, 'activation_class_name'):

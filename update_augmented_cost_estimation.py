@@ -27,6 +27,7 @@ CONFIG_HEADERS = (
     "augment-refine-ret",
     "lambda-struct",
     "activation",
+    "augment-mq-queries",
 )
 HEADERS = [
     "test_db",
@@ -57,6 +58,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--augment-refine-ret", required=True)
     parser.add_argument("--lambda-struct", type=float, required=True)
     parser.add_argument("--activation", default="LeakyReLU")
+    parser.add_argument("--augment-mq-queries", type=int, default=None)
     return parser.parse_args()
 
 
@@ -147,6 +149,11 @@ def build_values(
         "augment-refine-ret": args.augment_refine_ret,
         "lambda-struct": args.lambda_struct,
         "activation": args.activation,
+        # The query count only applies to multi_query_attention; other poolings leave it blank so they
+        # still match their earlier rows instead of carrying an unused default.
+        "augment-mq-queries": (
+            args.augment_mq_queries if args.augment_pooling == "multi_query_attention" else None
+        ),
     }
     for kind, prefix in WORKLOAD_PREFIXES:
         for metric in METRICS:
@@ -183,7 +190,7 @@ def normalized(value: object) -> str:
 def same_configuration(left: Dict[str, object], right: Dict[str, object]) -> bool:
     key_headers = ("test_db", "cardinality_type", "epochs", *CONFIG_HEADERS)
     for header in key_headers:
-        if header in {"epochs", "augment-coarse-layers", "lambda-struct"}:
+        if header in {"epochs", "augment-coarse-layers", "lambda-struct", "augment-mq-queries"}:
             if as_float(left.get(header)) != as_float(right.get(header)):
                 return False
         elif header == "test-augment":

@@ -28,7 +28,8 @@ class ZeroShotModel(FcOutModel):
                  augment_include_inv: bool = False,
                  augment_refine_ret: bool = True,
                  augment_seq_regions: bool = False,
-                 augment_cfg_coarse_edges: bool = False):
+                 augment_cfg_coarse_edges: bool = False,
+                 augment_mq_queries: int = 8):
 
         super().__init__(output_dim=output_dim, final_out_layer=True, **final_mlp_kwargs)
 
@@ -77,7 +78,8 @@ class ZeroShotModel(FcOutModel):
                 include_inv=augment_include_inv,
                 refine_ret=augment_refine_ret,
                 seq_regions=augment_seq_regions,
-                cfg_coarse_edges=augment_cfg_coarse_edges)
+                cfg_coarse_edges=augment_cfg_coarse_edges,
+                mq_num_queries=augment_mq_queries)
         else:
             self.graph_augmentor = None
         self.augmentation_enabled = self.graph_augmentor is not None

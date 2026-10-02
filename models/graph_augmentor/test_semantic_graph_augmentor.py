@@ -98,9 +98,9 @@ class SemanticGraphAugmentorSequenceRegionTest(unittest.TestCase):
 
     def test_forward_backward_with_seq_regions_for_all_poolings(self):
         graph = _loop_then_branch_graph()
-        for pooling in ["mean", "sum", "max", "weighted_mean", "attention", "hybrid"]:
+        for pooling in ["mean", "sum", "max", "weighted_mean", "attention", "hybrid", "multi_query_attention"]:
             augmentor = SemanticGraphAugmentor(
-                hidden_dim=4, pooling=pooling, seq_regions=True, cfg_coarse_edges=True)
+                hidden_dim=4, pooling=pooling, seq_regions=True, cfg_coarse_edges=True, mq_num_queries=2)
             feat_dict = {ntype: torch.randn(graph.num_nodes(ntype), 4, requires_grad=True)
                          for ntype in graph.ntypes}
 
@@ -157,6 +157,72 @@ class SemanticGraphAugmentorPoolingTest(unittest.TestCase):
         self.assertFalse(hasattr(mean, "hybrid_projection"))
         self.assertEqual(hybrid.hybrid_projection.in_features, 8)
         self.assertEqual(hybrid.hybrid_projection.out_features, 4)
+
+
+
+class SemanticGraphAugmentorMultiQueryPoolingTest(unittest.TestCase):
+    def test_output_shape_and_gradients_for_query_counts(self):
+        torch.manual_seed(0)
+        for num_queries in (1, 4, 8, 16):
+            augmentor = SemanticGraphAugmentor(
+                hidden_dim=128, pooling="multi_query_attention", mq_num_queries=num_queries)
+            for num_members in (1, 4, 7):
+                with self.subTest(num_queries=num_queries, num_members=num_members):
+                    augmentor.zero_grad()
+                    stacked = torch.randn(num_members, 128, requires_grad=True)
+
+                    pooled = augmentor._pool_members(stacked, torch.ones(num_members, 1))
+                    pooled.pow(2).sum().backward()
+
+                    self.assertEqual(pooled.shape, (128,))
+                    for grad in (augmentor.mq_value.weight.grad, stacked.grad):
+                        self.assertTrue(torch.isfinite(grad).all())
+                    self.assertTrue(torch.isfinite(augmentor.mq_queries.grad).all())
+                    if num_members > 1:
+                        # A single member gets softmax weight 1 regardless of the queries.
+                        self.assertGreater(augmentor.mq_queries.grad.abs().sum().item(), 0.0)
+
+    def test_query_count_must_divide_hidden_dim(self):
+        for num_queries in (0, 3, 256):
+            with self.assertRaises(ValueError):
+                SemanticGraphAugmentor(hidden_dim=128, pooling="multi_query_attention", mq_num_queries=num_queries)
+        # Other poolings ignore the query count.
+        SemanticGraphAugmentor(hidden_dim=128, pooling="attention", mq_num_queries=3)
+
+    def test_each_query_pools_its_own_value_slice(self):
+        augmentor = SemanticGraphAugmentor(hidden_dim=4, pooling="multi_query_attention", mq_num_queries=2)
+        with torch.no_grad():
+            augmentor.mq_value.weight.copy_(torch.eye(4))
+            augmentor.mq_value.bias.zero_()
+            # Query 0 sharply selects the member with the largest feature 0, query 1 feature 3.
+            augmentor.mq_queries.copy_(torch.tensor([[100.0, 0.0, 0.0, 0.0], [0.0, 0.0, 0.0, 100.0]]))
+        stacked = torch.tensor([
+            [1.0, 2.0, 3.0, 0.0],
+            [0.0, 5.0, 6.0, 1.0],
+        ])
+
+        actual = augmentor._pool_members(stacked, torch.ones(2, 1))
+
+        # Dims 0-1 come from member 0 (query 0's winner), dims 2-3 from member 1 (query 1's winner).
+        torch.testing.assert_close(actual, torch.tensor([1.0, 2.0, 6.0, 1.0]))
+
+    def test_attention_starts_near_uniform(self):
+        torch.manual_seed(0)
+        augmentor = SemanticGraphAugmentor(hidden_dim=128, pooling="multi_query_attention")
+        stacked = torch.randn(4, 128)
+
+        actual = augmentor._pool_members(stacked, torch.ones(4, 1))
+
+        # Small query init + 1/sqrt(d) scaling: initially ~ mean pooling of the projected values.
+        torch.testing.assert_close(actual, augmentor.mq_value(stacked).mean(dim=0), atol=0.02, rtol=0.0)
+
+    def test_mq_parameters_are_only_created_for_mq_pooling(self):
+        mq = SemanticGraphAugmentor(hidden_dim=8, pooling="multi_query_attention", mq_num_queries=4)
+        attention = SemanticGraphAugmentor(hidden_dim=8, pooling="attention")
+
+        self.assertEqual(tuple(mq.mq_queries.shape), (4, 8))
+        self.assertFalse(hasattr(attention, "mq_queries"))
+        self.assertFalse(hasattr(attention, "mq_value"))
 
 
 if __name__ == "__main__":

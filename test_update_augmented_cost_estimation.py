@@ -28,6 +28,7 @@ def arguments(**overrides):
         "augment_refine_ret": "False",
         "lambda_struct": 0.0,
         "activation": "LeakyReLU",
+        "augment_mq_queries": 8,
     }
     values.update(overrides)
     return argparse.Namespace(**values)
@@ -188,6 +189,55 @@ class UpdateAugmentedCostEstimationTest(unittest.TestCase):
                 [row[HEADERS.index("activation")] for row in rows[1:]],
                 ["LeakyReLU", "ReLU", "SELU", "CELU"],
             )
+
+
+    def test_mq_queries_blank_for_other_poolings(self):
+        # run_code.sh always passes AUGMENT_MQ_QUERIES; only MQ rows should record it.
+        values = build_values(arguments(augment_pooling="attention"), MQ_SUMMARY, MQ_BASELINE)
+        self.assertIsNone(values["augment-mq-queries"])
+
+        legacy = {header: values.get(header) for header in HEADERS if header != "augment-mq-queries"}
+        self.assertTrue(same_configuration(legacy, values))
+
+        mq = build_values(arguments(augment_pooling="multi_query_attention"), MQ_SUMMARY, MQ_BASELINE)
+        self.assertEqual(mq["augment-mq-queries"], 8)
+
+    def test_upsert_keeps_one_row_per_mq_query_count(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "augmented.xlsx"
+            upsert_result(str(path), build_values(arguments(augment_pooling="attention"), MQ_SUMMARY, MQ_BASELINE))
+            for num_queries in (4, 8, 16):
+                upsert_result(str(path), build_values(
+                    arguments(augment_pooling="multi_query_attention", augment_mq_queries=num_queries),
+                    MQ_SUMMARY, MQ_BASELINE))
+            # A rerun of M=8 replaces its own row; it does not touch M=4/16 or the attention row.
+            upsert_result(str(path), build_values(
+                arguments(augment_pooling="multi_query_attention", augment_mq_queries=8,
+                          time_stamp="20260820_130000"),
+                MQ_SUMMARY, MQ_BASELINE))
+
+            workbook = load_workbook(path, read_only=True, data_only=True)
+            rows = list(workbook["Augmented"].iter_rows(values_only=True))
+            workbook.close()
+            self.assertEqual(
+                [(row[HEADERS.index("augment-pooling")], row[HEADERS.index("augment-mq-queries")])
+                 for row in rows[1:]],
+                [("attention", None), ("multi_query_attention", 4),
+                 ("multi_query_attention", 8), ("multi_query_attention", 16)],
+            )
+            self.assertEqual(rows[3][HEADERS.index("time_stamp")], "20260820_130000")
+
+
+MQ_SUMMARY = {
+    "workloads": {
+        "workload_pullup_est": {"q50": (2.5, 0.0, 1), "q95": (5.0, 0.0, 1), "q99": (8.5, 0.0, 1)},
+        "workload_pushdown_est": {"q50": (3.0, 0.0, 1), "q95": (6.0, 0.0, 1), "q99": (9.0, 0.0, 1)},
+    }
+}
+MQ_BASELINE = {
+    "pullup": {"q50": 4.0, "q95": 7.0, "q99": 10.0},
+    "pushdown": {"q50": 5.0, "q95": 8.0, "q99": 11.0},
+}
 
 
 if __name__ == "__main__":

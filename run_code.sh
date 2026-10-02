@@ -127,7 +127,8 @@ PRETRAINED_MODEL_FILENAME="${PRETRAINED_MODEL_FILENAME:-}"
 
 AUGMENT="${AUGMENT:-False}"            #? True, False
 TEST_AUGMENT=True                     #? Effective only when AUGMENT=True; False disables augmentation for held-out testing.
-AUGMENT_POOLING="${AUGMENT_POOLING:-attention}"  #? mean, sum, max, weighted_mean, attention, hybrid, hybrid_attn_max, hybrid_max_wmean, hybrid_max_wmean_gated
+AUGMENT_POOLING="${AUGMENT_POOLING:-attention}"  #? mean, sum, max, weighted_mean, attention, hybrid, hybrid_attn_max, hybrid_max_wmean, hybrid_max_wmean_gated, multi_query_attention
+AUGMENT_MQ_QUERIES="${AUGMENT_MQ_QUERIES:-8}"  #? 1, 2, 4, 8, 16, ... (must divide the hidden dim, 128). Used only by multi_query_attention.
 AUGMENT_REFINEMENT="gated_residual"   #? residual_sum, gated_residual
 AUGMENT_COARSE_LAYERS="${AUGMENT_COARSE_LAYERS:-1}"  #? 0, 1, 2, ... (run 1 round of message passing between the coarse/region nodes created by the augmentation.)
 AUGMENT_INCLUDE_INV=False             #? True, False
@@ -201,6 +202,7 @@ append_summary() {
             --run-variable "AUGMENT=$AUGMENT" \
             --run-variable "TEST_AUGMENT=$TEST_AUGMENT" \
             --run-variable "AUGMENT_POOLING=$AUGMENT_POOLING" \
+            --run-variable "AUGMENT_MQ_QUERIES=$AUGMENT_MQ_QUERIES" \
             --run-variable "AUGMENT_REFINEMENT=$AUGMENT_REFINEMENT" \
             --run-variable "AUGMENT_COARSE_LAYERS=$AUGMENT_COARSE_LAYERS" \
             --run-variable "AUGMENT_INCLUDE_INV=$AUGMENT_INCLUDE_INV" \
@@ -278,6 +280,7 @@ for CARDINALITY_TYPE in "${CARDINALITY_TYPE_LIST[@]}"; do
         --augment "$AUGMENT"
         --test_augment "$TEST_AUGMENT"
         --augment_pooling "$AUGMENT_POOLING"
+        --augment_mq_queries "$AUGMENT_MQ_QUERIES"
         --augment_refinement "$AUGMENT_REFINEMENT"
         --augment_coarse_layers "$AUGMENT_COARSE_LAYERS"
         --augment_include_inv "$AUGMENT_INCLUDE_INV"
@@ -335,6 +338,7 @@ for CARDINALITY_TYPE in "${CARDINALITY_TYPE_LIST[@]}"; do
         echo "Augment: $AUGMENT" | tee_log
         echo "Test augment: $TEST_AUGMENT" | tee_log
         echo "Augment pooling: $AUGMENT_POOLING" | tee_log
+        [[ "$AUGMENT_POOLING" == "multi_query_attention" ]] && echo "Augment MQ queries: $AUGMENT_MQ_QUERIES" | tee_log
         echo "Augment refinement: $AUGMENT_REFINEMENT" | tee_log
         echo "Augment coarse layers: $AUGMENT_COARSE_LAYERS" | tee_log
         echo "Augment include INV: $AUGMENT_INCLUDE_INV" | tee_log
@@ -443,6 +447,7 @@ for CARDINALITY_TYPE in "${CARDINALITY_TYPE_LIST[@]}"; do
                 --output-xlsx "$AUGMENTED_RESULTS_XLSX" \
                 --test-augment "$TEST_AUGMENT" \
                 --augment-pooling "$AUGMENT_POOLING" \
+                --augment-mq-queries "$AUGMENT_MQ_QUERIES" \
                 --augment-refinement "$AUGMENT_REFINEMENT" \
                 --augment-coarse-layers "$AUGMENT_COARSE_LAYERS" \
                 --augment-include-inv "$AUGMENT_INCLUDE_INV" \

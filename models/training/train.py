@@ -646,6 +646,7 @@ def train_model(workload_runs,
                 augment_refine_ret: bool = True,
                 augment_seq_regions: bool = False,
                 augment_cfg_coarse_edges: bool = False,
+                augment_mq_queries: int = 8,
                 lambda_struct: float = 0.0,
                 deterministic: bool = False,
                 test_all_cardinality: bool = True,
@@ -715,6 +716,7 @@ def train_model(workload_runs,
                                   augment_refine_ret=augment_refine_ret,
                                   augment_seq_regions=augment_seq_regions,
                                   augment_cfg_coarse_edges=augment_cfg_coarse_edges,
+                                  augment_mq_queries=augment_mq_queries,
                                   **model_kwargs)
     model = gen_model()
 

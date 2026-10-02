@@ -149,6 +149,7 @@ def get_config(hyperparams: Dict[str, Any], wl_base_path: str, assemble_filename
         augment_refine_ret=True,
         augment_seq_regions=False,
         augment_cfg_coarse_edges=False,
+        augment_mq_queries=8,
         lambda_struct=0.0,
     )
 
@@ -382,6 +383,11 @@ def get_config(hyperparams: Dict[str, Any], wl_base_path: str, assemble_filename
         config['augment_pooling'] = hyperparams.pop('augment_pooling')
         if config['augment']:
             model_name += f'_augpool{config["augment_pooling"]}'
+    if 'augment_mq_queries' in hyperparams:
+        config['augment_mq_queries'] = hyperparams.pop('augment_mq_queries')
+    if config['augment'] and config['augment_pooling'] == 'multi_query_attention':
+        #? The query count only means something for MQ pooling, so other runs keep their old names.
+        model_name += f'_mq{config["augment_mq_queries"]}'
     if 'augment_refinement' in hyperparams:
         config['augment_refinement'] = hyperparams.pop('augment_refinement')
         if config['augment']:

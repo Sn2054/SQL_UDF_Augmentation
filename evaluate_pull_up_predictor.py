@@ -53,7 +53,9 @@ if __name__ == '__main__':
     #? These must match training when loading an augmented checkpoint.
     parser.add_argument('--augment', type=str2bool, default=argparse.SUPPRESS)
     parser.add_argument('--test_augment', type=str2bool, default=argparse.SUPPRESS)
-    parser.add_argument('--augment_pooling', choices=['mean', 'sum', 'max', 'weighted_mean', 'attention', 'hybrid'],
+    parser.add_argument('--augment_pooling', choices=['mean', 'sum', 'max', 'weighted_mean', 'attention', 'hybrid',
+                                                     'hybrid_attn_max', 'hybrid_max_wmean', 'hybrid_max_wmean_gated',
+                                                     'multi_query_attention'],
                         default=argparse.SUPPRESS)
     parser.add_argument('--augment_refinement', choices=['residual_sum', 'gated_residual'],
                         default=argparse.SUPPRESS)
@@ -62,6 +64,7 @@ if __name__ == '__main__':
     parser.add_argument('--augment_refine_ret', type=str2bool, default=argparse.SUPPRESS)
     parser.add_argument('--augment_seq_regions', type=str2bool, default=argparse.SUPPRESS)
     parser.add_argument('--augment_cfg_coarse_edges', type=str2bool, default=argparse.SUPPRESS)
+    parser.add_argument('--augment_mq_queries', type=int, default=argparse.SUPPRESS)
     ###
     # End Args
     ###
@@ -121,6 +124,8 @@ if __name__ == '__main__':
         args_config['augment_seq_regions'] = args.augment_seq_regions
     if hasattr(args, 'augment_cfg_coarse_edges'):
         args_config['augment_cfg_coarse_edges'] = args.augment_cfg_coarse_edges
+    if hasattr(args, 'augment_mq_queries'):
+        args_config['augment_mq_queries'] = args.augment_mq_queries
 
     orig_args_config = args_config.copy()
     config, _, _, _, _ = get_config(args_config, wl_base_path='', assemble_filenames=False)
@@ -186,7 +191,8 @@ if __name__ == '__main__':
                                        augment_include_inv=config['augment_include_inv'],
                                        augment_refine_ret=config['augment_refine_ret'],
                                        augment_seq_regions=config['augment_seq_regions'],
-                                       augment_cfg_coarse_edges=config['augment_cfg_coarse_edges'])
+                                       augment_cfg_coarse_edges=config['augment_cfg_coarse_edges'],
+                                       augment_mq_queries=config['augment_mq_queries'])
 
     # move to gpu
     model = model.to(model.device)

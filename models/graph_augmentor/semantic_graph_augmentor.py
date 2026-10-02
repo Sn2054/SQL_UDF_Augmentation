@@ -22,15 +22,20 @@ class SemanticGraphAugmentor(nn.Module):
             include_inv: bool = False,
             refine_ret: bool = True,
             seq_regions: bool = False,
-            cfg_coarse_edges: bool = False):
+            cfg_coarse_edges: bool = False,
+            mq_num_queries: int = 8):
         super().__init__()
         valid_pooling = {"mean", "sum", "max", "weighted_mean", "attention", "hybrid",
-                         "hybrid_attn_max", "hybrid_max_wmean", "hybrid_max_wmean_gated"}
+                         "hybrid_attn_max", "hybrid_max_wmean", "hybrid_max_wmean_gated",
+                         "multi_query_attention"}
         valid_refinement = {"residual_sum", "gated_residual"}
         if pooling not in valid_pooling:
             raise ValueError(f"Unknown augment pooling {pooling}. Expected one of {sorted(valid_pooling)}")
         if refinement not in valid_refinement:
             raise ValueError(f"Unknown augment refinement {refinement}. Expected one of {sorted(valid_refinement)}")
+        if pooling == "multi_query_attention" and (mq_num_queries <= 0 or hidden_dim % mq_num_queries != 0):
+            raise ValueError(f"augment mq_num_queries ({mq_num_queries}) must be positive and divide "
+                             f"hidden_dim ({hidden_dim})")
 
         self.hidden_dim = hidden_dim
         self.pooling = pooling
@@ -59,6 +64,14 @@ class SemanticGraphAugmentor(nn.Module):
             #? The gate must map to a hidden_dim-sized [0,1] mixing vector, not reduce
             #? dimensionality like the concat+project hybrids do, so it needs its own layer.
             self.hybrid_max_wmean_gate = nn.Linear(hidden_dim * 2, hidden_dim)
+        if pooling == "multi_query_attention":
+            #? Efficient Probing (Psomas et al., ICLR 2026): M learned queries, each with its own softmax
+            #? over members, each pooling its own hidden_dim/M slice of a value projection (no key projection).
+            #? Small init + 1/sqrt(d) scaling (as in EP) keeps the initial attention near-uniform (~ mean),
+            #? since member embeddings are not normalized.
+            self.mq_num_queries = mq_num_queries
+            self.mq_queries = nn.Parameter(torch.randn(mq_num_queries, hidden_dim) * 0.02)
+            self.mq_value = nn.Linear(hidden_dim, hidden_dim)
         self.coarse_update = nn.Sequential(
             nn.Linear(hidden_dim * 2, hidden_dim),
             nn.LeakyReLU(inplace=True),
@@ -316,6 +329,12 @@ class SemanticGraphAugmentor(nn.Module):
             wmean_pooled = (stacked * safe_weights).sum(dim=0) / safe_weights.sum(dim=0).clamp(min=1.0)
             gate = torch.sigmoid(self.hybrid_max_wmean_gate(torch.cat([max_pooled, wmean_pooled], dim=-1)))
             return gate * max_pooled + (1 - gate) * wmean_pooled
+        if self.pooling == "multi_query_attention":
+            num_members = stacked.shape[0]
+            scores = (stacked @ self.mq_queries.t()) * self.hidden_dim ** -0.5  # [n, M]
+            attn = torch.softmax(scores, dim=0)  # per query, over members
+            values = self.mq_value(stacked).view(num_members, self.mq_num_queries, -1)  # [n, M, d/M]
+            return (attn.unsqueeze(-1) * values).sum(dim=0).reshape(self.hidden_dim)
         raise ValueError(f"Unknown augment pooling {self.pooling}")
 
     def _coarse_message_passing(
