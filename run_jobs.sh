@@ -34,27 +34,20 @@ RUN_SCRIPT="$SCRIPT_DIR/run_code.sh"
 # -----------------------------------------------------------------------
 # EP multi-query pooling sweep on the new supernodes (2026-10-05): Ishana's region fix + SEQ regions +
 # CFG coarse edges on, LeakyReLU, est, 100 epochs, coarse_layers=1, lambda_struct=0.1.
-#   1. baseline attention per DB
-#   2. multi_query_attention M=1 and M=8 per DB
-#   3. multi_query_attention M=4 and M=16 per DB
+# Database by database (fhnk, employee, financial); per database: attention baseline, then
+# multi_query_attention M=1, 8, 4, 16. fhnk's baseline already ran as job 1 of the first launch.
 # -----------------------------------------------------------------------
 COMMON="GPU_UUID=GPU-042f3a36-fa80-8994-33b1-37c79834d513 CARDINALITY_TYPE=est AUGMENT=True EPOCHS=100 AUGMENT_COARSE_LAYERS=1 LAMBDA_STRUCT=0.1 ACTIVATION_CLASS_NAME=LeakyReLU AUGMENT_SEQ_REGIONS=True AUGMENT_CFG_COARSE_EDGES=True"
-DBS="fhnk employee financial"
 
 JOBS=()
-for db in $DBS; do
-    JOBS+=("$db-base-attention TEST_DB=$db $COMMON AUGMENT_POOLING=attention")
-done
-for db in $DBS; do
-    for m in 1 8; do
+for db in fhnk employee financial; do
+    [[ "$db" != fhnk ]] && JOBS+=("$db-base-attention TEST_DB=$db $COMMON AUGMENT_POOLING=attention")
+    for m in 1 8 4 16; do
         JOBS+=("$db-mq$m TEST_DB=$db $COMMON AUGMENT_POOLING=multi_query_attention AUGMENT_MQ_QUERIES=$m")
     done
 done
-for db in $DBS; do
-    for m in 4 16; do
-        JOBS+=("$db-mq$m TEST_DB=$db $COMMON AUGMENT_POOLING=multi_query_attention AUGMENT_MQ_QUERIES=$m")
-    done
-done
+
+while pgrep -u "$USER" -f "bash .*run_code.sh" >/dev/null; do sleep 300; done
 
 declare -A exit_codes=()
 
