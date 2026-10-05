@@ -28,6 +28,8 @@ CONFIG_HEADERS = (
     "lambda-struct",
     "activation",
     "augment-mq-queries",
+    "augment-seq-regions",
+    "augment-cfg-coarse-edges",
 )
 HEADERS = [
     "test_db",
@@ -59,6 +61,8 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--lambda-struct", type=float, required=True)
     parser.add_argument("--activation", default="LeakyReLU")
     parser.add_argument("--augment-mq-queries", type=int, default=None)
+    parser.add_argument("--augment-seq-regions", default=None)
+    parser.add_argument("--augment-cfg-coarse-edges", default=None)
     return parser.parse_args()
 
 
@@ -154,6 +158,8 @@ def build_values(
         "augment-mq-queries": (
             args.augment_mq_queries if args.augment_pooling == "multi_query_attention" else None
         ),
+        "augment-seq-regions": args.augment_seq_regions,
+        "augment-cfg-coarse-edges": args.augment_cfg_coarse_edges,
     }
     for kind, prefix in WORKLOAD_PREFIXES:
         for metric in METRICS:

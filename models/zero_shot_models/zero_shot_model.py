@@ -79,7 +79,8 @@ class ZeroShotModel(FcOutModel):
                 refine_ret=augment_refine_ret,
                 seq_regions=augment_seq_regions,
                 cfg_coarse_edges=augment_cfg_coarse_edges,
-                mq_num_queries=augment_mq_queries)
+                mq_num_queries=augment_mq_queries,
+                activation_class_name=copy_tree_layer_kwargs.get('activation_class_name', 'LeakyReLU'))
         else:
             self.graph_augmentor = None
         self.augmentation_enabled = self.graph_augmentor is not None

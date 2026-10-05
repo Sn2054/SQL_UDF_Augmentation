@@ -6,6 +6,8 @@ import torch
 from torch import nn
 import torch.nn.functional as F
 
+from models.zero_shot_models.utils import activations
+
 
 UDF_NODE_TYPES = ("INV", "COMP", "BRANCH", "LOOP", "LOOPEND", "RET")
 DEFAULT_REFINED_NODE_TYPES = ("COMP", "BRANCH", "LOOP", "LOOPEND", "RET")
@@ -23,7 +25,8 @@ class SemanticGraphAugmentor(nn.Module):
             refine_ret: bool = True,
             seq_regions: bool = False,
             cfg_coarse_edges: bool = False,
-            mq_num_queries: int = 8):
+            mq_num_queries: int = 8,
+            activation_class_name: str = "LeakyReLU"):
         super().__init__()
         valid_pooling = {"mean", "sum", "max", "weighted_mean", "attention", "hybrid",
                          "hybrid_attn_max", "hybrid_max_wmean", "hybrid_max_wmean_gated",
@@ -74,7 +77,7 @@ class SemanticGraphAugmentor(nn.Module):
             self.mq_value = nn.Linear(hidden_dim, hidden_dim)
         self.coarse_update = nn.Sequential(
             nn.Linear(hidden_dim * 2, hidden_dim),
-            nn.LeakyReLU(inplace=True),
+            activations.__dict__[activation_class_name](inplace=True),
             nn.Linear(hidden_dim, hidden_dim),
         )
         self.context_projection = nn.Linear(hidden_dim, hidden_dim)

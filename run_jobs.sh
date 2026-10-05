@@ -32,31 +32,28 @@ RUN_SCRIPT="$SCRIPT_DIR/run_code.sh"
 # defaults). A short label (before the first space) is just for the
 # summary printout below.
 # -----------------------------------------------------------------------
-# Leftover sweep (2026-09-30). Pinned by GPU UUID, not index: index order can
-# differ between nvidia-smi and CUDA and across reboots, the UUID can't.
-# Same cohort as the first sweep (coarse_layers=1 / lambda_struct=0.1 / est /
-# 100 epochs), see understanding/progress.md sec. 8.
-#   - fhnk: only GELU and SiLU are new (LeakyReLU/ReLU/SELU/CELU and both
-#     hybrids already have rows).
-#   - employee, financial: activations ReLU/SELU/CELU/GELU/SiLU (attention
-#     pooling) and the two hybrids (LeakyReLU). No LeakyReLU or gated runs.
+# EP multi-query pooling sweep on the new supernodes (2026-10-05): Ishana's region fix + SEQ regions +
+# CFG coarse edges on, LeakyReLU, est, 100 epochs, coarse_layers=1, lambda_struct=0.1.
+#   1. baseline attention per DB
+#   2. multi_query_attention M=1 and M=8 per DB
+#   3. multi_query_attention M=4 and M=16 per DB
 # -----------------------------------------------------------------------
-COMMON="GPU_UUID=GPU-042f3a36-fa80-8994-33b1-37c79834d513 CARDINALITY_TYPE=est AUGMENT=True EPOCHS=100 AUGMENT_COARSE_LAYERS=1 LAMBDA_STRUCT=0.1"
+COMMON="GPU_UUID=GPU-042f3a36-fa80-8994-33b1-37c79834d513 CARDINALITY_TYPE=est AUGMENT=True EPOCHS=100 AUGMENT_COARSE_LAYERS=1 LAMBDA_STRUCT=0.1 ACTIVATION_CLASS_NAME=LeakyReLU AUGMENT_SEQ_REGIONS=True AUGMENT_CFG_COARSE_EDGES=True"
+DBS="fhnk employee financial"
 
-JOBS=(
-    "fhnk-act-gelu TEST_DB=fhnk $COMMON AUGMENT_POOLING=attention ACTIVATION_CLASS_NAME=GELU"
-    "fhnk-act-silu TEST_DB=fhnk $COMMON AUGMENT_POOLING=attention ACTIVATION_CLASS_NAME=SiLU"
-)
-for db in employee financial; do
-    JOBS+=(
-        "$db-act-relu TEST_DB=$db $COMMON AUGMENT_POOLING=attention ACTIVATION_CLASS_NAME=ReLU"
-        "$db-act-selu TEST_DB=$db $COMMON AUGMENT_POOLING=attention ACTIVATION_CLASS_NAME=SELU"
-        "$db-act-celu TEST_DB=$db $COMMON AUGMENT_POOLING=attention ACTIVATION_CLASS_NAME=CELU"
-        "$db-act-gelu TEST_DB=$db $COMMON AUGMENT_POOLING=attention ACTIVATION_CLASS_NAME=GELU"
-        "$db-act-silu TEST_DB=$db $COMMON AUGMENT_POOLING=attention ACTIVATION_CLASS_NAME=SiLU"
-        "$db-pool-hybrid_attn_max TEST_DB=$db $COMMON AUGMENT_POOLING=hybrid_attn_max ACTIVATION_CLASS_NAME=LeakyReLU"
-        "$db-pool-hybrid_max_wmean TEST_DB=$db $COMMON AUGMENT_POOLING=hybrid_max_wmean ACTIVATION_CLASS_NAME=LeakyReLU"
-    )
+JOBS=()
+for db in $DBS; do
+    JOBS+=("$db-base-attention TEST_DB=$db $COMMON AUGMENT_POOLING=attention")
+done
+for db in $DBS; do
+    for m in 1 8; do
+        JOBS+=("$db-mq$m TEST_DB=$db $COMMON AUGMENT_POOLING=multi_query_attention AUGMENT_MQ_QUERIES=$m")
+    done
+done
+for db in $DBS; do
+    for m in 4 16; do
+        JOBS+=("$db-mq$m TEST_DB=$db $COMMON AUGMENT_POOLING=multi_query_attention AUGMENT_MQ_QUERIES=$m")
+    done
 done
 
 declare -A exit_codes=()

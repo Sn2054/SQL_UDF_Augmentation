@@ -29,6 +29,8 @@ def arguments(**overrides):
         "lambda_struct": 0.0,
         "activation": "LeakyReLU",
         "augment_mq_queries": 8,
+        "augment_seq_regions": "False",
+        "augment_cfg_coarse_edges": "False",
     }
     values.update(overrides)
     return argparse.Namespace(**values)
@@ -226,6 +228,30 @@ class UpdateAugmentedCostEstimationTest(unittest.TestCase):
                  ("multi_query_attention", 8), ("multi_query_attention", 16)],
             )
             self.assertEqual(rows[3][HEADERS.index("time_stamp")], "20260820_130000")
+
+    def test_legacy_blank_supernode_flags_are_kept_not_overwritten(self):
+        summary = {"workloads": {
+            "workload_pullup_est": {"q50": (2.5, 0.0, 1), "q95": (5.0, 0.0, 1), "q99": (8.5, 0.0, 1)},
+            "workload_pushdown_est": {"q50": (3.0, 0.0, 1), "q95": (6.0, 0.0, 1), "q99": (9.0, 0.0, 1)},
+        }}
+        baseline = {"pullup": {"q50": 4.0, "q95": 7.0, "q99": 10.0},
+                    "pushdown": {"q50": 5.0, "q95": 8.0, "q99": 11.0}}
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "augmented.xlsx"
+            legacy = build_values(arguments(augment_seq_regions=None, augment_cfg_coarse_edges=None),
+                                  summary, baseline)
+            upsert_result(str(path), legacy)
+            for seq, cfg in (("True", "True"), ("False", "False"), ("True", "True")):
+                upsert_result(str(path), build_values(
+                    arguments(augment_seq_regions=seq, augment_cfg_coarse_edges=cfg), summary, baseline))
+
+            workbook = load_workbook(path, read_only=True, data_only=True)
+            rows = list(workbook["Augmented"].iter_rows(values_only=True))
+            workbook.close()
+            flags = [(row[HEADERS.index("augment-seq-regions")], row[HEADERS.index("augment-cfg-coarse-edges")])
+                     for row in rows[1:]]
+            self.assertEqual(flags, [(None, None), ("True", "True"), ("False", "False")])
+
 
 
 MQ_SUMMARY = {
