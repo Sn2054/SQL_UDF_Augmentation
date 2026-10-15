@@ -11,10 +11,10 @@
 #
 # Jobs run SEQUENTIALLY on purpose (they share the results/*.xlsx files).
 #
-# Usage (GPU_UUID = the UUID the lab assigned to you; never a GPU index):
-#   GPU_UUID=GPU-... LIST_ONLY=1 WAVES="1 2" bash run_jobs.sh   # print the jobs, run nothing
+# Usage (GPU_UUID defaults to your allocated UUID below; never a GPU index):
+#   LIST_ONLY=1 WAVES="1 2" bash run_jobs.sh   # print the jobs, run nothing
 #   tmux new -s jobs
-#   GPU_UUID=GPU-... WAVES="1" bash run_jobs.sh                 # run wave 1
+#   WAVES="1" bash run_jobs.sh                 # run wave 1
 #
 # Environment variables are single-valued per job (the driver word-splits the
 # overrides), so est and act are separate jobs, never CARDINALITY_TYPES="est act".
@@ -24,7 +24,7 @@ set -uo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 RUN_SCRIPT="$SCRIPT_DIR/run_code.sh"
 
-: "${GPU_UUID:?set GPU_UUID=<your allocated GPU UUID> (the old UUID from before the 2026-10-12 reset is not yours any more)}"
+GPU_UUID="${GPU_UUID:-GPU-452b1bc7-d479-c54a-050e-e27eabf2d1de}"  # your allocated GPU after the 2026-10-12 reset (given 2026-10-14); override with GPU_UUID=... if the lab reassigns it
 WAVES="${WAVES:-1}"
 LIST_ONLY="${LIST_ONLY:-0}"
 
