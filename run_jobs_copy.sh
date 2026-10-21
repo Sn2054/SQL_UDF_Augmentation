@@ -14,6 +14,9 @@
 #
 # Usage:
 #   QUEUE=A LIST_ONLY=1 bash run_jobs.sh          # print a queue's jobs, run nothing
+# After an interruption (e.g. a server reboot), restart a queue at the interrupted job and resume it:
+#   START_AT=<label> RESUME_DIR=saved/models/<dir> RESUME_FILE=<checkpoint name without .pt> bash run_jobs.sh ...
+# START_AT skips the jobs listed before <label>; the resume applies to that first job only.
 #   tmux new -s jobsA   ->   bash run_jobs.sh      2>&1 | tee -a saved/training_logs/run_jobs_A_$(date +%Y%m%d_%H%M%S).log
 #   tmux new -s jobsB   ->   bash run_jobs_copy.sh 2>&1 | tee -a saved/training_logs/run_jobs_B_$(date +%Y%m%d_%H%M%S).log
 #
@@ -25,6 +28,9 @@ set -uo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 QUEUE="${QUEUE:-B}"   # this is run_jobs_copy.sh: queue B by default (run_jobs.sh defaults to A)
 LIST_ONLY="${LIST_ONLY:-0}"
+START_AT="${START_AT:-}"
+RESUME_DIR="${RESUME_DIR:-}"
+RESUME_FILE="${RESUME_FILE:-}"
 
 # Both UUIDs are the user's allocations (given by the user; never index-based).
 GPU_UUID_A="GPU-452b1bc7-d479-c54a-050e-e27eabf2d1de"
@@ -88,6 +94,21 @@ else
     job financial-selu-ep4-est     financial  est $EP4
     job employee-selu-ep16-est     employee   est $EP16
     job seznam-selu-ep4-est        seznam     est $EP4
+fi
+
+if [[ -n "$START_AT" ]]; then
+    for i in "${!JOBS[@]}"; do
+        [[ "${JOBS[$i]%% *}" == "$START_AT" ]] && break
+        unset 'JOBS[i]'
+    done
+    JOBS=("${JOBS[@]}")
+    if [[ ${#JOBS[@]} -eq 0 ]]; then echo "START_AT=$START_AT matches no job in queue $QUEUE"; exit 2; fi
+fi
+if [[ -n "$RESUME_DIR$RESUME_FILE" ]]; then
+    if [[ -z "$RESUME_DIR" || -z "$RESUME_FILE" || ! -f "$SCRIPT_DIR/$RESUME_DIR/$RESUME_FILE.pt" && ! -f "$RESUME_DIR/$RESUME_FILE.pt" ]]; then
+        echo "RESUME_DIR/RESUME_FILE must both be set and point at an existing <file>.pt"; exit 2
+    fi
+    JOBS[0]="${JOBS[0]} PRETRAINED_MODEL_ARTIFACT_DIR=$RESUME_DIR PRETRAINED_MODEL_FILENAME=$RESUME_FILE"
 fi
 
 if [[ "$LIST_ONLY" == "1" ]]; then
