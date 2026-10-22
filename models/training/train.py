@@ -587,7 +587,10 @@ def extract_test_paths(path: str, card: str, target_dir: str, filename_model: st
 
     test_workload = test_workload + f'_{card}'
 
-    test_path = os.path.join(target_dir, f'test_{filename_model}_{test_workload}.csv')
+    # Long augmented run names (e.g. multi_query_attention + actSELU) exceed the 255-byte filename limit here; trim the
+    # model name from the left so its unique timestamp suffix is kept. Results are parsed from the log, not this file.
+    max_model_len = 255 - len(f'test__{test_workload}.csv'.encode())
+    test_path = os.path.join(target_dir, f'test_{filename_model[-max_model_len:]}_{test_workload}.csv')
 
     return test_workload, test_path
 

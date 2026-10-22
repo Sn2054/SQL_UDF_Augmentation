@@ -282,12 +282,13 @@ def get_config(hyperparams: Dict[str, Any], wl_base_path: str, assemble_filename
     if 'work_with_udf_repr' in hyperparams:
         config['work_with_udf_repr'] = hyperparams.pop('work_with_udf_repr')
         model_name = f'udfrepr_{model_name}'
+    # No name prefix for a pretrained checkpoint: in this repo it is only used to resume an interrupted run, which should
+    # keep its run name. The old 'pretrained_' prefix (added once per argument) pushed the test CSV names past the
+    # 255-byte filename limit, so resumed runs crashed at test time (OSError 36, 2026-10-22).
     if 'pretrained_model_artifact_dir' in hyperparams:
         config['pretrained_model_artifact_dir'] = hyperparams.pop('pretrained_model_artifact_dir')
-        model_name = f'pretrained_{model_name}'
     if 'pretrained_model_filename' in hyperparams:
         config['pretrained_model_filename'] = hyperparams.pop('pretrained_model_filename')
-        model_name = f'pretrained_{model_name}'
     if 'test_with_count_edges_msg_aggr' in hyperparams:
         config['test_with_count_edges_msg_aggr'] = hyperparams.pop('test_with_count_edges_msg_aggr')
         model_name = f'testctedges_{model_name}'
