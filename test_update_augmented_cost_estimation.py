@@ -104,6 +104,30 @@ class UpdateAugmentedCostEstimationTest(unittest.TestCase):
         self.assertEqual(actual["diff_pull_up_q99_mean"], 1.5)
         self.assertEqual(actual["diff_push_down_q50_mean"], 2.0)
 
+    def test_abs_err_columns_derived_from_row(self):
+        # Mirrors employee act push: baseline 1.1094, augmented 1.1067 -> 0.2% raw, 2.47% of the distance to 1.
+        summary = {"workloads": {
+            "workload_pullup_est": {"q50": (1.1067, 0.0, 1), "q95": (2.0, 0.0, 1), "q99": (3.0, 0.0, 1)},
+            "workload_pushdown_est": {"q50": (1.5, 0.0, 1), "q95": (2.0, 0.0, 1), "q99": (3.0, 0.0, 1)},
+        }}
+        values = build_values(arguments(), summary, {
+            "pullup": {"q50": 1.1094, "q95": 2.0, "q99": 3.0},
+            "pushdown": {"q50": 1.4, "q95": 2.0, "q99": 3.0},
+        })
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "augmented.xlsx"
+            upsert_result(str(path), values)
+            upsert_result(str(path), None)  # refresh only
+            workbook = load_workbook(path, read_only=True, data_only=True)
+            rows = list(workbook["Augmented"].iter_rows(values_only=True))
+            workbook.close()
+        self.assertEqual(len(rows), 2)
+        row = dict(zip(rows[0], rows[1]))
+        self.assertAlmostEqual(row["abs_err_diff_pull_up_q50"], 0.1067)
+        self.assertAlmostEqual(row["abs_err_reduction_pull_up_q50_pct"], 100 * 0.0027 / 0.1094, places=3)
+        self.assertAlmostEqual(row["abs_err_diff_push_down_q50"], 0.5)
+        self.assertAlmostEqual(row["abs_err_reduction_push_down_q50_pct"], -25.0, places=6)  # worse than baseline
+
     def test_upsert_keeps_distinct_configs_and_replaces_matching_config(self):
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / "augmented.xlsx"

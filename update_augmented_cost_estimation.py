@@ -36,6 +36,11 @@ HEADERS = [
     "cardinality_type",
     *(f"{prefix}_{metric}_mean" for _, prefix in WORKLOAD_PREFIXES for metric in METRICS),
     *(f"diff_{prefix}_{metric}_mean" for _, prefix in WORKLOAD_PREFIXES for metric in METRICS),
+    # Distance from a perfect prediction (q-error 1) on q50, q50 - 1, and the share of the baseline's distance that the
+    # augmentation removes: 100 * diff / (baseline q50 - 1), with baseline q50 = q50 + diff (the baseline the row's diff
+    # column was computed against). Derived from the row on every write, so old rows are backfilled consistently.
+    *(f"abs_err_diff_{prefix}_q50" for _, prefix in WORKLOAD_PREFIXES),
+    *(f"abs_err_reduction_{prefix}_q50_pct" for _, prefix in WORKLOAD_PREFIXES),
     "time_stamp",
     *CONFIG_HEADERS,
     "epochs",
@@ -172,6 +177,20 @@ def build_values(
     return values
 
 
+def with_derived(result: Dict[str, object]) -> Dict[str, object]:
+    """Recompute the derived columns of a row from its stored q50 mean and diff (also backfills old rows)."""
+    result = dict(result)
+    for _, prefix in WORKLOAD_PREFIXES:
+        q50 = as_float(result.get(f"{prefix}_q50_mean"))
+        diff = as_float(result.get(f"diff_{prefix}_q50_mean"))
+        result[f"abs_err_diff_{prefix}_q50"] = None if q50 is None else round(q50 - 1.0, 10)
+        baseline_distance = None if q50 is None or diff is None else q50 + diff - 1.0
+        result[f"abs_err_reduction_{prefix}_q50_pct"] = (
+            round(100.0 * diff / baseline_distance, 4) if baseline_distance and baseline_distance > 0 else None
+        )
+    return result
+
+
 def read_existing_results(worksheet):
     rows = worksheet.iter_rows(values_only=True)
     headers = next(rows, None)
@@ -212,7 +231,8 @@ def same_configuration(left: Dict[str, object], right: Dict[str, object]) -> boo
     return True
 
 
-def upsert_result(path: str, values: Dict[str, object]) -> None:
+def upsert_result(path: str, values: Optional[Dict[str, object]]) -> None:
+    """Insert or replace the row matching values' configuration; values=None only rewrites the sheet (refreshes derived columns)."""
     output_dir = os.path.dirname(path)
     if output_dir:
         os.makedirs(output_dir, exist_ok=True)
@@ -228,14 +248,17 @@ def upsert_result(path: str, values: Dict[str, object]) -> None:
             worksheet.title = "Augmented"
 
         results = read_existing_results(worksheet)
-        target_index = next(
+        target_index = None if values is None else next(
             (index for index, result in enumerate(results) if same_configuration(result, values)),
             None,
         )
-        if target_index is None:
+        if values is None:
+            pass
+        elif target_index is None:
             results.append(values)
         else:
             results[target_index] = values
+        results = [with_derived(result) for result in results]
 
         worksheet.delete_rows(1, worksheet.max_row)
         worksheet.append(HEADERS)

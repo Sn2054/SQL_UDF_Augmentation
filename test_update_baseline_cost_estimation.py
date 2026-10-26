@@ -39,5 +39,20 @@ class UpdateBaselineCostEstimationTest(unittest.TestCase):
 
 
 
+    def test_abs_err_diff_is_q50_minus_one_and_refresh_backfills(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "baseline.xlsx"
+            upsert_result(str(path), result(50))
+            upsert_result(str(path), None)  # refresh only: no row added or replaced
+
+            workbook = load_workbook(path, read_only=True, data_only=True)
+            rows = list(workbook["Baseline"].iter_rows(values_only=True))
+            workbook.close()
+
+            self.assertEqual(len(rows), 2)
+            self.assertAlmostEqual(rows[1][HEADERS.index("abs_err_diff_pull_up_q50")], 0.2)
+            self.assertAlmostEqual(rows[1][HEADERS.index("abs_err_diff_push_down_q50")], 0.4)
+
+
 if __name__ == "__main__":
     unittest.main()

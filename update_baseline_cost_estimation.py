@@ -20,9 +20,23 @@ HEADERS = [
     "test_db",
     "cardinality_type",
     *(f"{prefix}_{metric}_mean" for _, prefix in WORKLOAD_PREFIXES for metric in METRICS),
+    # Distance from a perfect prediction (q-error 1) on q50: q50 - 1. Derived from the row on every write.
+    *(f"abs_err_diff_{prefix}_q50" for _, prefix in WORKLOAD_PREFIXES),
     "time_stamp",
     "epochs",
 ]
+
+
+def with_derived(result: Dict[str, object]) -> Dict[str, object]:
+    """Recompute the derived columns of a row from its stored q50 means (also backfills old rows)."""
+    result = dict(result)
+    for _, prefix in WORKLOAD_PREFIXES:
+        try:
+            q50 = float(result.get(f"{prefix}_q50_mean"))
+        except (TypeError, ValueError):
+            q50 = None
+        result[f"abs_err_diff_{prefix}_q50"] = None if q50 is None else round(q50 - 1.0, 10)
+    return result
 
 
 def parse_args() -> argparse.Namespace:
@@ -81,7 +95,8 @@ def read_existing_results(worksheet):
     return results
 
 
-def upsert_result(path: str, values: Dict[str, object]) -> None:
+def upsert_result(path: str, values: Optional[Dict[str, object]]) -> None:
+    """Insert or replace the row of values' (db, card type); values=None only rewrites the sheet (refreshes derived columns)."""
     output_dir = os.path.dirname(path)
     if output_dir:
         os.makedirs(output_dir, exist_ok=True)
@@ -100,7 +115,7 @@ def upsert_result(path: str, values: Dict[str, object]) -> None:
 
         results = read_existing_results(worksheet)
         target_index = None
-        for index, result in enumerate(results):
+        for index, result in enumerate(results if values is not None else []):
             same_database = str(result["test_db"] or "").casefold() == str(values["test_db"]).casefold()
             existing_cardinality = str(result["cardinality_type"] or "")
             same_cardinality = existing_cardinality.casefold() == str(values["cardinality_type"]).casefold()
@@ -108,10 +123,13 @@ def upsert_result(path: str, values: Dict[str, object]) -> None:
             if same_database and (same_cardinality or legacy_row):
                 target_index = index
                 break
-        if target_index is None:
+        if values is None:
+            pass
+        elif target_index is None:
             results.append(values)
         else:
             results[target_index] = values
+        results = [with_derived(result) for result in results]
 
         worksheet.delete_rows(1, worksheet.max_row)
         worksheet.append(HEADERS)
