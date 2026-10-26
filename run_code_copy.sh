@@ -367,7 +367,9 @@ for CARDINALITY_TYPE in "${CARDINALITY_TYPE_LIST[@]}"; do
         fi
 
     if [[ -f "$LOSS_CURVE_SCRIPT" && "${SAVE_LOSS_PLOTS,,}" == "true" ]]; then
-        last_checkpoint_line="$(grep "Saved checkpoint to" "$LOG" | tail -1)"
+        #? `|| true`: a test-only run (resuming a finished checkpoint) logs no checkpoint line, and a failing grep under
+        #? set -e + pipefail would exit here, before the run summary and the results row (2026-10-26).
+        last_checkpoint_line="$(grep "Saved checkpoint to" "$LOG" | tail -1 || true)"
         checkpoint_pt_path="$(echo "$last_checkpoint_line" | sed -n "s/.*Saved checkpoint to \(.*\.pt\) in .*/\1/p")"
         if [[ -n "$checkpoint_pt_path" ]]; then
             stats_csv_path="${checkpoint_pt_path%.pt}.csv"

@@ -42,58 +42,45 @@ case "$QUEUE" in
 esac
 
 # -----------------------------------------------------------------------
-# Plan (2026-10-19). Baselines are not run here: the non-augmented baselines
-# (50 epochs) come from Ishana's runs, merged into results/baseline_cost_estimation.xlsx;
-# fhnk/employee/financial have our own. Every augmented job: est or act, 100 epochs,
-# SELU, coarse_layers=1, lambda_struct=0.1, new supernodes (SEQ regions + CFG coarse edges).
-# New DBs: credit, tournament, seznam (chosen 2026-10-19: both est and act baselines
-# exist and Ishana is not augmenting them; Ishana's baselines merged into the baseline sheet).
-# Rough job time ~15-20 h (one GPU-day per ~1.3 jobs).
+# Plan (2026-10-26): finalize the pooling among attention, max and hybrid (EP dropped: no gain over
+# attention). hybrid = concat(mean-pool, max-pool) -> linear back to d (semantic_graph_augmentor.py).
+# hybrid est on the six databases that already have attention and/or max est, same settings as all
+# augmented runs: est, 100 epochs, SELU, coarse_layers=1, lambda_struct=0.1, new supernodes (SEQ regions
+# + CFG coarse edges). Plus a rerun of the financial act baseline (non-augmented, LeakyReLU = run_code.sh
+# default, 100 epochs): its 50-epoch push q50 1.6225 is far above every other act baseline (1.11-1.23).
+# The baseline sheet is keyed on (db, card), so the rerun replaces that row (backup:
+# results/backup_20261026_act_rows/baseline_cost_estimation.before_financial_act_rerun.xlsx).
+# The 2026-10-19 plan (attention/act/max/EP slots 1-9) finished; see git history and progress.md.
+# Rough job time ~15-20 h per augmented job, ~6 h per baseline.
 # -----------------------------------------------------------------------
 COMMON="GPU_UUID=$GPU_UUID AUGMENT=True EPOCHS=100 AUGMENT_COARSE_LAYERS=1 LAMBDA_STRUCT=0.1 AUGMENT_SEQ_REGIONS=True AUGMENT_CFG_COARSE_EDGES=True ACTIVATION_CLASS_NAME=SELU"
 ATTN="AUGMENT_POOLING=attention"
 MAX="AUGMENT_POOLING=max"
-EP4="AUGMENT_POOLING=multi_query_attention AUGMENT_MQ_QUERIES=4"
-EP16="AUGMENT_POOLING=multi_query_attention AUGMENT_MQ_QUERIES=16"
+HYBRID="AUGMENT_POOLING=hybrid"
 
 JOBS=()
 job() {  # label db card pooling-overrides...
     local label="$1" db="$2" card="$3"; shift 3
     JOBS+=("$label TEST_DB=$db $COMMON CARDINALITY_TYPE=$card $*")
 }
+baseline() {  # label db card -- non-augmented reference model (LeakyReLU default), 100 epochs
+    JOBS+=("$1 TEST_DB=$2 GPU_UUID=$GPU_UUID AUGMENT=False EPOCHS=100 CARDINALITY_TYPE=$3")
+}
 
-# Order (both queues run side by side, ~15-20 h per slot): first the result that can be shown for
-# each new DB (attention est, then act, so each DB is complete early), then act for the original
-# DBs, then the pooling ablations (max, then EP). Slot by slot:
-#   1  credit est        | seznam est
-#   2  tournament est    | credit act
-#   3  tournament act    | seznam act        -> all three new DBs have est + act
-#   4  fhnk act          | employee act
-#   5  financial act     | employee max      -> original DBs have act
-#   6  financial max     | employee EP4
-#   7  credit EP4        | financial EP4
-#   8  tournament EP4    | employee EP16
-#   9  financial EP16    | seznam EP4
+# Slot by slot (both queues side by side):
+#   1  financial act baseline | employee hybrid est
+#   2  fhnk hybrid est        | credit hybrid est
+#   3  financial hybrid est   | seznam hybrid est
+#   4  tournament hybrid est  |
 if [[ "$QUEUE" == A ]]; then
-    job credit-selu-attn-est       credit     est $ATTN
-    job tournament-selu-attn-est   tournament est $ATTN
-    job tournament-selu-attn-act   tournament act $ATTN
-    job fhnk-selu-attn-act         fhnk       act $ATTN
-    job financial-selu-attn-act    financial  act $ATTN
-    job financial-selu-max-est     financial  est $MAX
-    job credit-selu-ep4-est        credit     est $EP4
-    job tournament-selu-ep4-est    tournament est $EP4
-    job financial-selu-ep16-est    financial  est $EP16
+    baseline financial-base-act       financial  act
+    job fhnk-selu-hybrid-est          fhnk       est $HYBRID
+    job financial-selu-hybrid-est     financial  est $HYBRID
+    job tournament-selu-hybrid-est    tournament est $HYBRID
 else
-    job seznam-selu-attn-est       seznam     est $ATTN
-    job credit-selu-attn-act       credit     act $ATTN
-    job seznam-selu-attn-act       seznam     act $ATTN
-    job employee-selu-attn-act     employee   act $ATTN
-    job employee-selu-max-est      employee   est $MAX
-    job employee-selu-ep4-est      employee   est $EP4
-    job financial-selu-ep4-est     financial  est $EP4
-    job employee-selu-ep16-est     employee   est $EP16
-    job seznam-selu-ep4-est        seznam     est $EP4
+    job employee-selu-hybrid-est      employee   est $HYBRID
+    job credit-selu-hybrid-est        credit     est $HYBRID
+    job seznam-selu-hybrid-est        seznam     est $HYBRID
 fi
 
 if [[ -n "$START_AT" ]]; then
@@ -119,7 +106,7 @@ if [[ "$LIST_ONLY" == "1" ]]; then
     exit 0
 fi
 
-# Queue A shares its GPU with the job left over from the stopped wave 2: wait for it.
+# Queue A waits for any leftover run_code.sh job on its GPU (never two jobs on one GPU).
 # (The pattern doesn't match run_code_copy.sh, so queue B never blocks queue A.)
 if [[ "$QUEUE" == A ]]; then
     while pgrep -u "$USER" -f "bash .*run_code\.sh" >/dev/null; do sleep 300; done
