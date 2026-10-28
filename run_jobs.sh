@@ -14,6 +14,8 @@
 #
 # Usage:
 #   QUEUE=A LIST_ONLY=1 bash run_jobs.sh          # print a queue's jobs, run nothing
+# Run one queue's job list on the other queue's GPU (e.g. when one GPU reservation has ended):
+#   QUEUE=B JOB_LIST=A bash run_jobs.sh ...      # queue A's jobs on GPU B via run_code_copy.sh
 # After an interruption (e.g. a server reboot), restart a queue at the interrupted job and resume it:
 #   START_AT=<label> RESUME_DIR=saved/models/<dir> RESUME_FILE=<checkpoint name without .pt> bash run_jobs.sh ...
 # START_AT skips the jobs listed before <label>; the resume applies to that first job only.
@@ -28,6 +30,7 @@ set -uo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 QUEUE="${QUEUE:-A}"   # run_jobs_copy.sh defaults this to B
 LIST_ONLY="${LIST_ONLY:-0}"
+JOB_LIST="${JOB_LIST:-$QUEUE}"   # which queue's job list to run; QUEUE still picks the GPU and run_code script
 START_AT="${START_AT:-}"
 RESUME_DIR="${RESUME_DIR:-}"
 RESUME_FILE="${RESUME_FILE:-}"
@@ -63,8 +66,8 @@ job() {  # label db card pooling-overrides...
     local label="$1" db="$2" card="$3"; shift 3
     JOBS+=("$label TEST_DB=$db $COMMON CARDINALITY_TYPE=$card $*")
 }
-baseline() {  # label db card -- non-augmented reference model (LeakyReLU default), 100 epochs
-    JOBS+=("$1 TEST_DB=$2 GPU_UUID=$GPU_UUID AUGMENT=False EPOCHS=100 CARDINALITY_TYPE=$3")
+baseline() {  # label db card -- non-augmented reference model (LeakyReLU default), 50 epochs (the baseline protocol)
+    JOBS+=("$1 TEST_DB=$2 GPU_UUID=$GPU_UUID AUGMENT=False EPOCHS=50 CARDINALITY_TYPE=$3")
 }
 
 # Slot by slot (both queues side by side):
@@ -72,7 +75,7 @@ baseline() {  # label db card -- non-augmented reference model (LeakyReLU defaul
 #   2  fhnk hybrid est        | credit hybrid est
 #   3  financial hybrid est   | seznam hybrid est
 #   4  tournament hybrid est  |
-if [[ "$QUEUE" == A ]]; then
+if [[ "$JOB_LIST" == A ]]; then
     baseline financial-base-act       financial  act
     job fhnk-selu-hybrid-est          fhnk       est $HYBRID
     job financial-selu-hybrid-est     financial  est $HYBRID
@@ -99,7 +102,7 @@ if [[ -n "$RESUME_DIR$RESUME_FILE" ]]; then
 fi
 
 if [[ "$LIST_ONLY" == "1" ]]; then
-    echo "queue $QUEUE ($GPU_UUID, $(basename "$RUN_SCRIPT")): ${#JOBS[@]} jobs"
+    echo "queue $QUEUE ($GPU_UUID, $(basename "$RUN_SCRIPT")), job list $JOB_LIST: ${#JOBS[@]} jobs"
     for job in "${JOBS[@]}"; do
         echo "  ${job%% *}  $(echo "${job#* }" | sed "s#$COMMON#<common>#")"
     done
@@ -108,7 +111,7 @@ fi
 
 # Queue A waits for any leftover run_code.sh job on its GPU (never two jobs on one GPU).
 # (The pattern doesn't match run_code_copy.sh, so queue B never blocks queue A.)
-if [[ "$QUEUE" == A ]]; then
+if [[ "$QUEUE" == A ]]; then  # same GPU as a leftover run_code.sh job
     while pgrep -u "$USER" -f "bash .*run_code\.sh" >/dev/null; do sleep 300; done
 fi
 
