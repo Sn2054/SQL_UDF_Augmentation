@@ -14,8 +14,6 @@
 #
 # Usage:
 #   QUEUE=A LIST_ONLY=1 bash run_jobs.sh          # print a queue's jobs, run nothing
-# Run one queue's job list on the other queue's GPU (e.g. when one GPU reservation has ended):
-#   QUEUE=B JOB_LIST=A bash run_jobs.sh ...      # queue A's jobs on GPU B via run_code_copy.sh
 # After an interruption (e.g. a server reboot), restart a queue at the interrupted job and resume it:
 #   START_AT=<label> RESUME_DIR=saved/models/<dir> RESUME_FILE=<checkpoint name without .pt> bash run_jobs.sh ...
 # START_AT skips the jobs listed before <label>; the resume applies to that first job only.
@@ -30,7 +28,6 @@ set -uo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 QUEUE="${QUEUE:-A}"   # run_jobs_copy.sh defaults this to B
 LIST_ONLY="${LIST_ONLY:-0}"
-JOB_LIST="${JOB_LIST:-$QUEUE}"   # which queue's job list to run; QUEUE still picks the GPU and run_code script
 START_AT="${START_AT:-}"
 RESUME_DIR="${RESUME_DIR:-}"
 RESUME_FILE="${RESUME_FILE:-}"
@@ -45,16 +42,20 @@ case "$QUEUE" in
 esac
 
 # -----------------------------------------------------------------------
-# Plan (2026-10-26): finalize the pooling among attention, max and hybrid (EP dropped: no gain over
-# attention). hybrid = concat(mean-pool, max-pool) -> linear back to d (semantic_graph_augmentor.py).
-# hybrid est on the six databases that already have attention and/or max est, same settings as all
-# augmented runs: est, 100 epochs, SELU, coarse_layers=1, lambda_struct=0.1, new supernodes (SEQ regions
-# + CFG coarse edges). Plus a rerun of the financial act baseline (non-augmented, LeakyReLU = run_code.sh
-# default, 100 epochs): its 50-epoch push q50 1.6225 is far above every other act baseline (1.11-1.23).
-# The baseline sheet is keyed on (db, card), so the rerun replaces that row (backup:
-# results/backup_20261026_act_rows/baseline_cost_estimation.before_financial_act_rerun.xlsx).
-# The 2026-10-19 plan (attention/act/max/EP slots 1-9) finished; see git history and progress.md.
-# Rough job time ~15-20 h per augmented job, ~6 h per baseline.
+# Plan (2026-10-30): pooling and activation stay fixed at hybrid + SELU (to be kept consistent across DBs);
+# only the numeric hyperparameters (coarse_layers, lambda_struct) may differ per DB. Our DBs are now
+# fhnk, employee, financial, credit, seznam, tournament, imdb, hepatitis, tpc_h.
+# Only one GPU is available (queue B), so this is one list, whichever QUEUE runs it:
+#   1-3: hybrid est on the three new DBs at the default settings (cl1, lambda 0.1). Their est
+#        baselines already exist (50 epochs, same server and code).
+#   4-7: tuning for the DBs where hybrid at the defaults is weakest vs the baseline: tournament
+#        (push +0.4%, pull +4.4%), financial and seznam pull (-3.5%, -3.8%). One setting changed at a
+#        time from cl1/lambda 0.1: coarse_layers 2, or lambda_struct 0.25.
+# Same settings otherwise as all augmented runs: est, 100 epochs, SELU, new supernodes (SEQ regions +
+# CFG coarse edges). The model name carries augcl<N> and cfl<lambda>, so tuning runs get their own
+# folders, and the augmented sheet keeps one row per config.
+# The 2026-10-26 plan (hybrid est on 6 DBs, financial act baseline rerun) finished; see git history and
+# progress.md. Rough job time ~15-20 h per augmented job, ~6 h per baseline.
 # -----------------------------------------------------------------------
 COMMON="GPU_UUID=$GPU_UUID AUGMENT=True EPOCHS=100 AUGMENT_COARSE_LAYERS=1 LAMBDA_STRUCT=0.1 AUGMENT_SEQ_REGIONS=True AUGMENT_CFG_COARSE_EDGES=True ACTIVATION_CLASS_NAME=SELU"
 ATTN="AUGMENT_POOLING=attention"
@@ -70,21 +71,16 @@ baseline() {  # label db card -- non-augmented reference model (LeakyReLU defaul
     JOBS+=("$1 TEST_DB=$2 GPU_UUID=$GPU_UUID AUGMENT=False EPOCHS=50 CARDINALITY_TYPE=$3")
 }
 
-# Slot by slot (both queues side by side):
-#   1  financial act baseline | employee hybrid est
-#   2  fhnk hybrid est        | credit hybrid est
-#   3  financial hybrid est   | seznam hybrid est
-#   4  tournament hybrid est  |
-if [[ "$JOB_LIST" == A ]]; then
-    baseline financial-base-act       financial  act
-    job fhnk-selu-hybrid-est          fhnk       est $HYBRID
-    job financial-selu-hybrid-est     financial  est $HYBRID
-    job tournament-selu-hybrid-est    tournament est $HYBRID
-else
-    job employee-selu-hybrid-est      employee   est $HYBRID
-    job credit-selu-hybrid-est        credit     est $HYBRID
-    job seznam-selu-hybrid-est        seznam     est $HYBRID
-fi
+# (later overrides win: env applies them in order, so CL2/L025 replace the values in $COMMON)
+CL2="AUGMENT_COARSE_LAYERS=2"
+L025="LAMBDA_STRUCT=0.25"
+job imdb-selu-hybrid-est              imdb       est $HYBRID
+job hepatitis-selu-hybrid-est         hepatitis  est $HYBRID
+job tpc_h-selu-hybrid-est             tpc_h      est $HYBRID
+job tournament-selu-hybrid-est-cl2    tournament est $HYBRID $CL2
+job tournament-selu-hybrid-est-l025   tournament est $HYBRID $L025
+job financial-selu-hybrid-est-cl2     financial  est $HYBRID $CL2
+job seznam-selu-hybrid-est-cl2        seznam     est $HYBRID $CL2
 
 if [[ -n "$START_AT" ]]; then
     for i in "${!JOBS[@]}"; do
@@ -102,7 +98,7 @@ if [[ -n "$RESUME_DIR$RESUME_FILE" ]]; then
 fi
 
 if [[ "$LIST_ONLY" == "1" ]]; then
-    echo "queue $QUEUE ($GPU_UUID, $(basename "$RUN_SCRIPT")), job list $JOB_LIST: ${#JOBS[@]} jobs"
+    echo "queue $QUEUE ($GPU_UUID, $(basename "$RUN_SCRIPT")), ${#JOBS[@]} jobs"
     for job in "${JOBS[@]}"; do
         echo "  ${job%% *}  $(echo "${job#* }" | sed "s#$COMMON#<common>#")"
     done
