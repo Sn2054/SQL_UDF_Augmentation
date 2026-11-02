@@ -116,6 +116,7 @@ NUM_WORKERS="${NUM_WORKERS:-8}"
 INCLUDE_PULLUP_DATA="${INCLUDE_PULLUP_DATA:-True}"
 INCLUDE_PUSHDOWN_DATA="${INCLUDE_PUSHDOWN_DATA:-True}"
 EPOCHS="${EPOCHS:-50}"
+EARLY_STOPPING_PATIENCE="${EARLY_STOPPING_PATIENCE:-20}"  #? epochs without a val q50 improvement before training stops. 20 since 2026-11-02 (before: the code default 10, which stopped several runs at epoch 27-35 with an under-trained model). Always passed, so model names carry _esp<N> and never reuse a patience-10 folder.
 BATCH_SIZE="${BATCH_SIZE:-512}"
 ACTIVATION_CLASS_NAME="${ACTIVATION_CLASS_NAME:-LeakyReLU}"  #? LeakyReLU, ReLU, CELU, SELU, GELU, SiLU -- applies everywhere (final layer, message passing, node encoder). Why? Simpler than special-casing just the output layer.
 PRETRAINED_MODEL_ARTIFACT_DIR="${PRETRAINED_MODEL_ARTIFACT_DIR:-}"  #? Set both this and PRETRAINED_MODEL_FILENAME to resume an interrupted run -- checkpoint filenames are freshly timestamped every invocation, so a plain re-run does NOT auto-resume; point these at the old saved/models/<dir>/ and its filename (no .pt) explicitly.
@@ -199,6 +200,7 @@ append_summary() {
             --run-variable "INCLUDE_PULLUP_DATA=$INCLUDE_PULLUP_DATA" \
             --run-variable "INCLUDE_PUSHDOWN_DATA=$INCLUDE_PUSHDOWN_DATA" \
             --run-variable "EPOCHS=$EPOCHS" \
+            --run-variable "EARLY_STOPPING_PATIENCE=$EARLY_STOPPING_PATIENCE" \
             --run-variable "BATCH_SIZE=$BATCH_SIZE" \
             --run-variable "ACTIVATION_CLASS_NAME=$ACTIVATION_CLASS_NAME" \
             --run-variable "AUGMENT=$AUGMENT" \
@@ -278,6 +280,7 @@ for CARDINALITY_TYPE in "${CARDINALITY_TYPE_LIST[@]}"; do
 
     COMMON_ARGS+=(
         --epochs "$EPOCHS"
+        --early_stopping_patience "$EARLY_STOPPING_PATIENCE"
         --batch_size "$BATCH_SIZE"
         --activation_class_name "$ACTIVATION_CLASS_NAME"
 
@@ -335,6 +338,7 @@ for CARDINALITY_TYPE in "${CARDINALITY_TYPE_LIST[@]}"; do
         echo "Include pull-up data: $INCLUDE_PULLUP_DATA" | tee_log
         echo "Include pushdown data: $INCLUDE_PUSHDOWN_DATA" | tee_log
         echo "Epochs: $EPOCHS" | tee_log
+        echo "Early stopping patience: $EARLY_STOPPING_PATIENCE" | tee_log
         echo "Batch size: $BATCH_SIZE" | tee_log
         echo "Activation: $ACTIVATION_CLASS_NAME" | tee_log
         if [[ -n "$PRETRAINED_MODEL_ARTIFACT_DIR" && -n "$PRETRAINED_MODEL_FILENAME" ]]; then
@@ -431,6 +435,7 @@ for CARDINALITY_TYPE in "${CARDINALITY_TYPE_LIST[@]}"; do
                 --cardinality-type "$CARDINALITY_TYPE" \
                 --time-stamp "$GROUP_RUN_TIME" \
                 --epochs "$EPOCHS" \
+                --early-stopping-patience "$EARLY_STOPPING_PATIENCE" \
                 --output-xlsx "$BASELINE_RESULTS_XLSX" \
                 "${RUN_XLSXS[@]}" 2>&1 | tee_log
             baseline_exit_code="${PIPESTATUS[0]}"
@@ -453,6 +458,7 @@ for CARDINALITY_TYPE in "${CARDINALITY_TYPE_LIST[@]}"; do
                 --cardinality-type "$CARDINALITY_TYPE" \
                 --time-stamp "$GROUP_RUN_TIME" \
                 --epochs "$EPOCHS" \
+                --early-stopping-patience "$EARLY_STOPPING_PATIENCE" \
                 --baseline-xlsx "$BASELINE_RESULTS_XLSX" \
                 --output-xlsx "$AUGMENTED_RESULTS_XLSX" \
                 --test-augment "$TEST_AUGMENT" \

@@ -53,6 +53,23 @@ class UpdateBaselineCostEstimationTest(unittest.TestCase):
             self.assertAlmostEqual(rows[1][HEADERS.index("abs_err_diff_pull_up_q50")], 0.2)
             self.assertAlmostEqual(rows[1][HEADERS.index("abs_err_diff_push_down_q50")], 0.4)
 
+    def test_patience_is_informational_and_blank_reads_as_10(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "baseline.xlsx"
+            upsert_result(str(path), result(50))  # no patience given, as in rows written before the column
+            upsert_result(str(path), None)
+            workbook = load_workbook(path, read_only=True, data_only=True)
+            rows = list(workbook["Baseline"].iter_rows(values_only=True))
+            workbook.close()
+            self.assertEqual(rows[1][HEADERS.index("early-stopping-patience")], 10)
+
+            upsert_result(str(path), {**result(50), "early-stopping-patience": 20})
+            workbook = load_workbook(path, read_only=True, data_only=True)
+            rows = list(workbook["Baseline"].iter_rows(values_only=True))
+            workbook.close()
+            self.assertEqual(len(rows), 2)  # same (db, card): replaced, not appended
+            self.assertEqual(rows[1][HEADERS.index("early-stopping-patience")], 20)
+
 
 if __name__ == "__main__":
     unittest.main()

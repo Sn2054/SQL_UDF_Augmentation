@@ -44,7 +44,11 @@ HEADERS = [
     "time_stamp",
     *CONFIG_HEADERS,
     "epochs",
+    "early-stopping-patience",
 ]
+# Every run before run_code.sh passed --early_stopping_patience (2026-11-02) trained with the code default of 10, so
+# rows without the column are read as 10: they stay distinct from patience-20 reruns instead of being overwritten.
+LEGACY_EARLY_STOPPING_PATIENCE = 10
 
 
 def parse_args() -> argparse.Namespace:
@@ -55,6 +59,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--cardinality-type", required=True)
     parser.add_argument("--time-stamp", required=True)
     parser.add_argument("--epochs", type=int, required=True)
+    parser.add_argument("--early-stopping-patience", type=int, required=True)
     parser.add_argument("--baseline-xlsx", required=True)
     parser.add_argument("--output-xlsx", required=True)
     parser.add_argument("--test-augment", required=True)
@@ -150,6 +155,7 @@ def build_values(
         "cardinality_type": args.cardinality_type,
         "time_stamp": args.time_stamp,
         "epochs": args.epochs,
+        "early-stopping-patience": args.early_stopping_patience,
         "test-augment": args.test_augment,
         "augment-pooling": args.augment_pooling,
         "augment-refinement": args.augment_refinement,
@@ -204,6 +210,8 @@ def read_existing_results(worksheet):
             for header in HEADERS
         }
         if result["test_db"] not in (None, ""):
+            if result["early-stopping-patience"] in (None, ""):
+                result["early-stopping-patience"] = LEGACY_EARLY_STOPPING_PATIENCE
             results.append(result)
     return results
 
@@ -213,9 +221,13 @@ def normalized(value: object) -> str:
 
 
 def same_configuration(left: Dict[str, object], right: Dict[str, object]) -> bool:
-    key_headers = ("test_db", "cardinality_type", "epochs", *CONFIG_HEADERS)
+    key_headers = ("test_db", "cardinality_type", "epochs", "early-stopping-patience", *CONFIG_HEADERS)
     for header in key_headers:
-        if header in {"epochs", "augment-coarse-layers", "lambda-struct", "augment-mq-queries"}:
+        if header == "early-stopping-patience":
+            if (as_float(left.get(header)) or LEGACY_EARLY_STOPPING_PATIENCE) != (
+                    as_float(right.get(header)) or LEGACY_EARLY_STOPPING_PATIENCE):
+                return False
+        elif header in {"epochs", "augment-coarse-layers", "lambda-struct", "augment-mq-queries"}:
             if as_float(left.get(header)) != as_float(right.get(header)):
                 return False
         elif header == "test-augment":

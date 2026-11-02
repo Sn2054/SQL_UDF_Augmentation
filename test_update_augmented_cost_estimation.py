@@ -20,6 +20,7 @@ def arguments(**overrides):
         "cardinality_type": "est",
         "time_stamp": "20260820_120000",
         "epochs": 100,
+        "early_stopping_patience": 20,
         "test_augment": "True",
         "augment_pooling": "hybrid",
         "augment_refinement": "gated_residual",
@@ -276,6 +277,37 @@ class UpdateAugmentedCostEstimationTest(unittest.TestCase):
                      for row in rows[1:]]
             self.assertEqual(flags, [(None, None), ("True", "True"), ("False", "False")])
 
+
+    def test_upsert_keeps_one_row_per_patience_and_reads_blank_as_10(self):
+        summary = {"workloads": {
+            "workload_pullup_est": {"q50": (2.5, 0.0, 1), "q95": (5.0, 0.0, 1), "q99": (8.5, 0.0, 1)},
+            "workload_pushdown_est": {"q50": (3.0, 0.0, 1), "q95": (6.0, 0.0, 1), "q99": (9.0, 0.0, 1)},
+        }}
+        baseline = {
+            "pullup": {"q50": 4.0, "q95": 7.0, "q99": 10.0},
+            "pushdown": {"q50": 5.0, "q95": 8.0, "q99": 11.0},
+        }
+        patience_10 = build_values(arguments(early_stopping_patience=10), summary, baseline)
+        patience_20 = build_values(arguments(), summary, baseline)
+        patience_20_rerun = build_values(arguments(time_stamp="20260820_130000"), summary, baseline)
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "augmented.xlsx"
+            upsert_result(str(path), patience_10)
+            # Blank the cell, as in rows written before the column existed.
+            workbook = load_workbook(path)
+            workbook["Augmented"].cell(row=2, column=HEADERS.index("early-stopping-patience") + 1).value = None
+            workbook.save(path)
+            upsert_result(str(path), patience_20)
+            upsert_result(str(path), patience_20_rerun)
+
+            workbook = load_workbook(path, read_only=True, data_only=True)
+            rows = list(workbook["Augmented"].iter_rows(values_only=True))
+            workbook.close()
+        patience = HEADERS.index("early-stopping-patience")
+        self.assertEqual([row[patience] for row in rows[1:]], [10, 20])
+        self.assertEqual(rows[2][HEADERS.index("time_stamp")], "20260820_130000")
+        self.assertTrue(same_configuration({**patience_10, "early-stopping-patience": None}, patience_10))
+        self.assertFalse(same_configuration({**patience_10, "early-stopping-patience": None}, patience_20))
 
 
 MQ_SUMMARY = {

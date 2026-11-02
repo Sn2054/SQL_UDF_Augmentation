@@ -24,7 +24,11 @@ HEADERS = [
     *(f"abs_err_diff_{prefix}_q50" for _, prefix in WORKLOAD_PREFIXES),
     "time_stamp",
     "epochs",
+    "early-stopping-patience",
 ]
+# Informational like epochs (rows stay keyed on db + card type). Rows written before run_code.sh passed
+# --early_stopping_patience (2026-11-02) trained with the code default of 10, so a blank cell is read as 10.
+LEGACY_EARLY_STOPPING_PATIENCE = 10
 
 
 def with_derived(result: Dict[str, object]) -> Dict[str, object]:
@@ -47,6 +51,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--cardinality-type", required=True)
     parser.add_argument("--time-stamp", required=True)
     parser.add_argument("--epochs", type=int, required=True)
+    parser.add_argument("--early-stopping-patience", type=int, required=True)
     parser.add_argument("--output-xlsx", required=True)
     return parser.parse_args()
 
@@ -65,6 +70,7 @@ def build_values(args: argparse.Namespace, summary: Dict[str, object]) -> Dict[s
         "cardinality_type": args.cardinality_type,
         "time_stamp": args.time_stamp,
         "epochs": args.epochs,
+        "early-stopping-patience": args.early_stopping_patience,
     }
     workload_metrics = {}
     for workload, metrics in summary["workloads"].items():
@@ -91,6 +97,8 @@ def read_existing_results(worksheet):
             for header in HEADERS
         }
         if result["test_db"] not in (None, ""):
+            if result["early-stopping-patience"] in (None, ""):
+                result["early-stopping-patience"] = LEGACY_EARLY_STOPPING_PATIENCE
             results.append(result)
     return results
 
