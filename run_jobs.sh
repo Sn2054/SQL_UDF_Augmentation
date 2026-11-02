@@ -14,6 +14,8 @@
 #
 # Usage:
 #   QUEUE=A LIST_ONLY=1 bash run_jobs.sh          # print a queue's jobs, run nothing
+# Run one queue's job list on the other queue's GPU (e.g. when one GPU reservation has ended):
+#   QUEUE=B JOB_LIST=A bash run_jobs.sh ...      # queue A's jobs on GPU B via run_code_copy.sh
 # After an interruption (e.g. a server reboot), restart a queue at the interrupted job and resume it:
 #   START_AT=<label> RESUME_DIR=saved/models/<dir> RESUME_FILE=<checkpoint name without .pt> bash run_jobs.sh ...
 # START_AT skips the jobs listed before <label>; the resume applies to that first job only.
@@ -28,12 +30,13 @@ set -uo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 QUEUE="${QUEUE:-A}"   # run_jobs_copy.sh defaults this to B
 LIST_ONLY="${LIST_ONLY:-0}"
+JOB_LIST="${JOB_LIST:-$QUEUE}"   # which queue's job list to run; QUEUE still picks the GPU and run_code script
 START_AT="${START_AT:-}"
 RESUME_DIR="${RESUME_DIR:-}"
 RESUME_FILE="${RESUME_FILE:-}"
 
 # Both UUIDs are the user's allocations (given by the user; never index-based).
-GPU_UUID_A="GPU-452b1bc7-d479-c54a-050e-e27eabf2d1de"
+GPU_UUID_A="GPU-dfcf303a-7e8d-e2f6-b68c-c3d30682f80b"   # since 2026-11-02 (the earlier A, GPU-452b1bc7-..., ended 2026-10-28)
 GPU_UUID_B="GPU-060f92dc-2611-318d-5454-1ce480e07298"
 case "$QUEUE" in
     A) GPU_UUID="$GPU_UUID_A"; RUN_SCRIPT="$SCRIPT_DIR/run_code.sh" ;;
@@ -45,12 +48,14 @@ esac
 # Plan (2026-10-30): pooling and activation stay fixed at hybrid + SELU (to be kept consistent across DBs);
 # only the numeric hyperparameters (coarse_layers, lambda_struct) may differ per DB. Our DBs are now
 # fhnk, employee, financial, credit, seznam, tournament, imdb, hepatitis, tpc_h.
-# Only one GPU is available (queue B), so this is one list, whichever QUEUE runs it:
-#   1-3: hybrid est on the three new DBs at the default settings (cl1, lambda 0.1). Their est
-#        baselines already exist (50 epochs, same server and code).
-#   4-7: tuning for the DBs where hybrid at the defaults is weakest vs the baseline: tournament
-#        (push +0.4%, pull +4.4%), financial and seznam pull (-3.5%, -3.8%). One setting changed at a
-#        time from cl1/lambda 0.1: coarse_layers 2, or lambda_struct 0.25.
+# Two GPUs again from 2026-11-02, so the list is split into queues A and B (below). Jobs:
+#   hybrid est on the three new DBs at the default settings (cl1, lambda 0.1). Their est
+#        baselines already exist (50 epochs, same server and code). imdb and hepatitis are done; tpc_h was
+#        interrupted at epoch 27 by the 2026-10-31 maintenance and resumes first in queue A.
+#   tuning for the DBs where hybrid at the defaults is weakest vs the baseline: tournament
+#        (push +0.4%, pull +4.4%), hepatitis (push -7.9%, pull -15.4%; added 2026-11-02), financial and
+#        seznam pull (-3.5%, -3.8%). One setting changed at a time from cl1/lambda 0.1: coarse_layers 2,
+#        or lambda_struct 0.25.
 # Same settings otherwise as all augmented runs: est, 100 epochs, SELU, new supernodes (SEQ regions +
 # CFG coarse edges). The model name carries augcl<N> and cfl<lambda>, so tuning runs get their own
 # folders, and the augmented sheet keeps one row per config.
@@ -71,16 +76,24 @@ baseline() {  # label db card -- non-augmented reference model (LeakyReLU defaul
     JOBS+=("$1 TEST_DB=$2 GPU_UUID=$GPU_UUID AUGMENT=False EPOCHS=50 CARDINALITY_TYPE=$3")
 }
 
+# Slot by slot (both queues side by side; each tuned DB gets one setting per queue, so its pair finishes together):
+#   1  tpc_h hybrid est (resume)  | tournament hybrid est lambda .25
+#   2  tournament hybrid est cl2  | hepatitis hybrid est lambda .25
+#   3  hepatitis hybrid est cl2   | seznam hybrid est cl2
+#   4  financial hybrid est cl2   |
 # (later overrides win: env applies them in order, so CL2/L025 replace the values in $COMMON)
 CL2="AUGMENT_COARSE_LAYERS=2"
 L025="LAMBDA_STRUCT=0.25"
-job imdb-selu-hybrid-est              imdb       est $HYBRID
-job hepatitis-selu-hybrid-est         hepatitis  est $HYBRID
-job tpc_h-selu-hybrid-est             tpc_h      est $HYBRID
-job tournament-selu-hybrid-est-cl2    tournament est $HYBRID $CL2
-job tournament-selu-hybrid-est-l025   tournament est $HYBRID $L025
-job financial-selu-hybrid-est-cl2     financial  est $HYBRID $CL2
-job seznam-selu-hybrid-est-cl2        seznam     est $HYBRID $CL2
+if [[ "$JOB_LIST" == A ]]; then
+    job tpc_h-selu-hybrid-est             tpc_h      est $HYBRID
+    job tournament-selu-hybrid-est-cl2    tournament est $HYBRID $CL2
+    job hepatitis-selu-hybrid-est-cl2     hepatitis  est $HYBRID $CL2
+    job financial-selu-hybrid-est-cl2     financial  est $HYBRID $CL2
+else
+    job tournament-selu-hybrid-est-l025   tournament est $HYBRID $L025
+    job hepatitis-selu-hybrid-est-l025    hepatitis  est $HYBRID $L025
+    job seznam-selu-hybrid-est-cl2        seznam     est $HYBRID $CL2
+fi
 
 if [[ -n "$START_AT" ]]; then
     for i in "${!JOBS[@]}"; do
@@ -98,7 +111,7 @@ if [[ -n "$RESUME_DIR$RESUME_FILE" ]]; then
 fi
 
 if [[ "$LIST_ONLY" == "1" ]]; then
-    echo "queue $QUEUE ($GPU_UUID, $(basename "$RUN_SCRIPT")), ${#JOBS[@]} jobs"
+    echo "queue $QUEUE ($GPU_UUID, $(basename "$RUN_SCRIPT")), job list $JOB_LIST: ${#JOBS[@]} jobs"
     for job in "${JOBS[@]}"; do
         echo "  ${job%% *}  $(echo "${job#* }" | sed "s#$COMMON#<common>#")"
     done
