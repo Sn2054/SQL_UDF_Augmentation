@@ -76,23 +76,41 @@ baseline() {  # label db card -- non-augmented reference model (LeakyReLU defaul
     JOBS+=("$1 TEST_DB=$2 GPU_UUID=$GPU_UUID AUGMENT=False EPOCHS=50 CARDINALITY_TYPE=$3")
 }
 
-# Slot by slot (both queues side by side; each tuned DB gets one setting per queue, so its pair finishes together):
-#   1  tpc_h hybrid est (resume)  | tournament hybrid est lambda .25
-#   2  tournament hybrid est cl2  | hepatitis hybrid est lambda .25
-#   3  hepatitis hybrid est cl2   | seznam hybrid est cl2
-#   4  financial hybrid est cl2   |
+# The 2026-11-02 lists (tpc_h, tournament/hepatitis cl2 + lambda .25) finished; seznam cl2 and financial cl2 were
+# stopped on 2026-11-06 (for the CPU-only per-query profile) and resume from their checkpoints below.
+#
+# Plan (2026-11-06): hybrid + SELU est at the defaults (cl1, lambda 0.1, patience 20) on DBs not yet run with it
+# by us. accidents and ssb first (accidents has no augmented run at all; ssb only one, patience 10). baseball,
+# movielens and airline have one hybrid run each from Ishana (new supernodes, patience 10), all below the
+# baseline; geneea and carcinogenesis have none. imdb's defaults run (patience 10) is +38.6% push but -0.2%
+# pull, so it gets coarse_layers 2, the setting that took hepatitis to +17.1%. Every DB has its est baseline
+# (50 epochs).
+# Slot by slot:
+#   1  accidents hybrid est              | seznam hybrid est cl2 (resume, epoch 80 of 100)
+#   2  baseball hybrid est               | ssb hybrid est
+#   3  movielens hybrid est              | geneea hybrid est
+#   4  imdb hybrid est cl2               | airline hybrid est
+#   5  financial hybrid est cl2 (resume) | carcinogenesis hybrid est
 # (later overrides win: env applies them in order, so CL2/L025 replace the values in $COMMON)
 CL2="AUGMENT_COARSE_LAYERS=2"
 L025="LAMBDA_STRUCT=0.25"
+M=saved/models
+P=aug_est_complex_dd_pulluppushdown_ddestfonudf_liboh_gradnorm_mldupl_loopend_loopedge
+S=bs512_ep100_esp20_maxr30_augpoolhybrid_augrefgated_residual_augcl2_augnoRET_augseq_augcfge_cfl0.1_actSELU
+RESUME_SEZNAM="PRETRAINED_MODEL_ARTIFACT_DIR=$M/${P}_seznam_$S PRETRAINED_MODEL_FILENAME=${P}_seznam_${S}_20261104_234711_091"
+RESUME_FINANCIAL="PRETRAINED_MODEL_ARTIFACT_DIR=$M/${P}_financial_$S PRETRAINED_MODEL_FILENAME=${P}_financial_${S}_20261105_161959_089"
 if [[ "$JOB_LIST" == A ]]; then
-    job tpc_h-selu-hybrid-est             tpc_h      est $HYBRID
-    job tournament-selu-hybrid-est-cl2    tournament est $HYBRID $CL2
-    job hepatitis-selu-hybrid-est-cl2     hepatitis  est $HYBRID $CL2
-    job financial-selu-hybrid-est-cl2     financial  est $HYBRID $CL2
+    job accidents-selu-hybrid-est         accidents      est $HYBRID
+    job baseball-selu-hybrid-est          baseball       est $HYBRID
+    job movielens-selu-hybrid-est         movielens      est $HYBRID
+    job imdb-selu-hybrid-est-cl2          imdb           est $HYBRID $CL2
+    job financial-selu-hybrid-est-cl2     financial      est $HYBRID $CL2 $RESUME_FINANCIAL
 else
-    job tournament-selu-hybrid-est-l025   tournament est $HYBRID $L025
-    job hepatitis-selu-hybrid-est-l025    hepatitis  est $HYBRID $L025
-    job seznam-selu-hybrid-est-cl2        seznam     est $HYBRID $CL2
+    job seznam-selu-hybrid-est-cl2        seznam         est $HYBRID $CL2 $RESUME_SEZNAM
+    job ssb-selu-hybrid-est               ssb            est $HYBRID
+    job geneea-selu-hybrid-est            geneea         est $HYBRID
+    job airline-selu-hybrid-est           airline        est $HYBRID
+    job carcinogenesis-selu-hybrid-est    carcinogenesis est $HYBRID
 fi
 
 if [[ -n "$START_AT" ]]; then
