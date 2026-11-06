@@ -3,13 +3,19 @@
 UDF graphs and the q-error of the baseline and the augmented model, query by query.
 
 For each selected test query of a database, in both workloads (push-down, pull-up):
-  1. Run it in DuckDB 0.10.1, one query at a time, with the JSON profiler on (EXPLAIN ANALYZE, --repetitions
-     times), on GRACEFUL's database file opened read-only and with GRACEFUL's UDF definitions registered (as
-     cross_db_benchmark/benchmark_tools/dbms/run_workload.py does, including `filter_pushdown` disabled for
-     pull-up). Recorded per query: the total query time, the time of the plan operator(s) that call the UDF,
+  1. Run it in DuckDB 0.10.1 with the JSON profiler on (EXPLAIN ANALYZE), on GRACEFUL's database file opened
+     read-only and with GRACEFUL's UDF definitions registered (as cross_db_benchmark/benchmark_tools/dbms/
+     run_workload.py does, including `filter_pushdown` disabled for pull-up). The whole selected set runs in
+     --passes passes (2026-11-05 scheme): pass 1 in order (first to last query), pass 2 in reverse (last to
+     first), and pass 3 (and any further pass) in a seeded random order. Each query runs once per pass, one query
+     at a time, and the times are the mean over the passes, so no query is always measured early or late.
+     Recorded per query: the total query time, the time of the plan operator(s) that call the UDF,
      SQL time = total - UDF, and the executed plan. With --threads 1 (default) operator times are real
      seconds, so UDF time <= total time. With more threads DuckDB adds operator time up across threads, so the
      UDF time is thread-seconds and can exceed the total.
+     The DuckDB runs are pinned to one logical CPU (--pin_cpu). For every run, a sampler records that CPU's clock,
+     its core's temperature, the hottest package temperature, the system-wide CPU busy share and the load
+     average, so throttling or interference is visible per run (`<db>_<workload>_runs.csv`).
   2. Save the executed plan as a networkx tree (`plans/<id>.gpickle`, edges parent -> child, one node per
      operator) and a drawing (`plans/<id>.png`, the UDF operator in orange). Copy the query's UDF graph, GRACEFUL's
      `<udf>.loopend.gpickle` (the file the model reads), to `udf_graphs/<id>.gpickle` with a drawing.
@@ -25,6 +31,7 @@ Output, under --output_dir/<db>/:
 CPU only (lab rule: Claude never touches a GPU). Run with CUDA_VISIBLE_DEVICES="":
     CUDA_VISIBLE_DEVICES="" python profile_udf_queries.py --n_queries 100     # 100 per database per workload
     CUDA_VISIBLE_DEVICES="" python profile_udf_queries.py --n_queries 0       # every test query
+Pause other jobs on the machine during a timing run: they compete for CPU and memory bandwidth.
 """
 
 from __future__ import annotations
@@ -107,7 +114,9 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument('--workloads', nargs='+', default=list(WORKLOADS), choices=list(WORKLOADS))
     parser.add_argument('--seed', type=int, default=42)
     parser.add_argument('--threads', type=int, default=1)
-    parser.add_argument('--repetitions', type=int, default=3)
+    parser.add_argument('--passes', type=int, default=3,
+                        help='passes over the whole set: 1 in order, 2 reversed, 3+ random; times = mean')
+    parser.add_argument('--pin_cpu', type=int, default=2, help='logical CPU the DuckDB runs are pinned to')
     parser.add_argument('--timeout_s', type=float, default=300.0, help='per execution; the query is interrupted after')
     parser.add_argument('--num_workers', type=int, default=2, help='data loader workers for model inference')
     parser.add_argument('--output_dir', default='results/udf_query_profile')
@@ -352,6 +361,97 @@ def draw_udf_graph(g: nx.DiGraph, path: str, title: str):
     plt.close(fig)
 
 
+# ---------------------------------------------------------------- machine state (throttling / interference)
+
+def _read_number(path):
+    try:
+        return float(open(path).read().strip())
+    except (OSError, ValueError):
+        return None
+
+
+def coretemp_inputs(cpu: int):
+    """(this CPU's core temperature file, [package temperature files]) from the coretemp hwmon sensors."""
+    pkg = int(_read_number(f'/sys/devices/system/cpu/cpu{cpu}/topology/physical_package_id') or 0)
+    core = int(_read_number(f'/sys/devices/system/cpu/cpu{cpu}/topology/core_id') or 0)
+    core_file, package_files = None, []
+    for hw in sorted(os.listdir('/sys/class/hwmon')):
+        base = f'/sys/class/hwmon/{hw}'
+        try:
+            if open(f'{base}/name').read().strip() != 'coretemp':
+                continue
+        except OSError:
+            continue
+        labels = {}
+        for f in os.listdir(base):
+            if f.endswith('_label'):
+                labels[open(f'{base}/{f}').read().strip()] = f'{base}/{f[:-len("_label")]}_input'
+        package_files += [v for k, v in labels.items() if k.startswith('Package id')]
+        if f'Package id {pkg}' in labels and f'Core {core}' in labels:
+            core_file = labels[f'Core {core}']
+    return core_file, package_files
+
+
+def cpu_busy_ticks():
+    """(busy, total) jiffies over all CPUs from /proc/stat."""
+    fields = [int(x) for x in open('/proc/stat').readline().split()[1:]]
+    idle = fields[3] + (fields[4] if len(fields) > 4 else 0)
+    return sum(fields) - idle, sum(fields)
+
+
+class MachineSampler(threading.Thread):
+    """Samples the pinned CPU's clock and core temperature and the hottest package temperature every `period` s.
+    Started before the main thread pins itself, so it does not run on the measured CPU."""
+
+    def __init__(self, cpu: int, period: float = 0.25):
+        super().__init__(daemon=True)
+        self.cpu, self.period = cpu, period
+        self.freq_file = f'/sys/devices/system/cpu/cpu{cpu}/cpufreq/scaling_cur_freq'
+        self.core_file, self.package_files = coretemp_inputs(cpu)
+        self.samples = []  # (time, MHz, core C, package C)
+        self.lock = threading.Lock()
+        self.running = True
+
+    def run(self):
+        while self.running:
+            freq = _read_number(self.freq_file)
+            core = _read_number(self.core_file) if self.core_file else None
+            pkgs = [v for v in (_read_number(f) for f in self.package_files) if v is not None]
+            with self.lock:
+                self.samples.append((time.monotonic(), freq / 1000 if freq else None, core / 1000 if core else None,
+                                     max(pkgs) / 1000 if pkgs else None))
+                if len(self.samples) > 20000:
+                    del self.samples[:10000]
+            time.sleep(self.period)
+
+    def window(self, start: float, end: float) -> dict:
+        with self.lock:
+            win = [x for x in self.samples if start <= x[0] <= end] or self.samples[-1:]
+        freqs = [x[1] for x in win if x[1] is not None]
+        cores = [x[2] for x in win if x[2] is not None]
+        pkgs = [x[3] for x in win if x[3] is not None]
+        return dict(cpu_freq_mean_mhz=statistics.mean(freqs) if freqs else None,
+                    cpu_freq_min_mhz=min(freqs) if freqs else None,
+                    core_temp_max_c=max(cores) if cores else None,
+                    package_temp_max_c=max(pkgs) if pkgs else None, samples=len(win))
+
+
+def timed_run(con, sql: str, timeout_s: float, sampler: MachineSampler):
+    """One profiled execution plus the machine state while it ran."""
+    load1 = float(open('/proc/loadavg').read().split()[0])
+    started = time.strftime('%Y-%m-%d %H:%M:%S')
+    busy0, total0 = cpu_busy_ticks()
+    start = time.monotonic()
+    plan, _ = run_profiled(con, sql, timeout_s)
+    end = time.monotonic()
+    busy1, total1 = cpu_busy_ticks()
+    state = sampler.window(start, end)
+    state.update(loadavg_1min=load1,
+                 system_cpu_busy_pct=100 * (busy1 - busy0) / (total1 - total0) if total1 > total0 else None,
+                 wall_s=end - start, started=started)
+    return plan, state
+
+
 # ---------------------------------------------------------------- main
 
 def select_plans(plans_path: str, n: int, seed: int):
@@ -375,33 +475,76 @@ def profile_workload(db: str, workload: str, args, feature_statistics: dict, out
 
     for sub in ('plans', 'udf_graphs'):
         os.makedirs(os.path.join(out_dir, sub), exist_ok=True)
-    con = connect(db, workload, args.threads)
     graphs_dir = f'{WL_BASE}/{WORKLOADS[workload]}/dbs/{db}/created_graphs'
+    queries = [(f'{db}_{workload}_{idx:05d}', plan) for idx, plan in selected]
+
+    # Pass orders: 1 = in order, 2 = reversed, 3+ = seeded random. Every query runs once per pass.
+    orders = [list(range(len(queries))), list(range(len(queries)))[::-1]]
+    for p in range(2, args.passes):
+        order = list(range(len(queries)))
+        random.Random(args.seed + p).shuffle(order)
+        orders.append(order)
+    orders = orders[:args.passes]
+
+    sampler = MachineSampler(args.pin_cpu)
+    sampler.start()  # before pinning, so the sampler thread keeps the full CPU set
+    affinity = os.sched_getaffinity(0)
+    os.sched_setaffinity(0, {args.pin_cpu})
+    con = connect(db, workload, args.threads)
+    runs_by_query = {qid: {} for qid, _ in queries}
+    run_log = []
+    try:
+        for p, order in enumerate(orders, start=1):
+            print(f'  pass {p}/{len(orders)} ({["in order", "reversed"][p - 1] if p <= 2 else "random"})', flush=True)
+            for pos, k in enumerate(order, start=1):
+                qid, plan = queries[k]
+                plan_json, state = timed_run(con, plan.query, args.timeout_s, sampler)
+                total_s = float(plan_json.get('result', 0.0)) if plan_json else None
+                udf_s = udf_operator_time(plan_json, plan.udf.udf_name)[0] if plan_json else None
+                runs_by_query[qid][p] = (plan_json, total_s, udf_s, state)
+                run_log.append(dict(query_id=qid, pass_no=p, position=pos, total_time_s=total_s, udf_time_s=udf_s,
+                                    **state))
+                if pos % 100 == 0 or pos == len(order):
+                    print(f'    [{pos}/{len(order)}] {qid} {plan.udf.udf_name}  '
+                          f'{state["cpu_freq_mean_mhz"] or 0:.0f} MHz, core {state["core_temp_max_c"] or 0:.0f} C',
+                          flush=True)
+    finally:
+        con.close()
+        os.sched_setaffinity(0, affinity)
+        sampler.running = False
+    pd.DataFrame(run_log).to_csv(os.path.join(out_dir, f'{db}_{workload}_runs.csv'), index=False)
+
     rows = []
-    for k, (idx, plan) in enumerate(selected):
-        sql, udf_name = plan.query, plan.udf.udf_name
-        qid = f'{db}_{workload}_{idx:05d}'
-        print(f'  [{k + 1}/{len(selected)}] {qid} {udf_name}', flush=True)
-        runs = [run_profiled(con, sql, args.timeout_s) for _ in range(args.repetitions)]
-        runs = [(p, w) for p, w in runs if p is not None]
-        row = dict(query_id=qid, workload=workload, udf=udf_name, sql=sql, threads=args.threads,
-                   repetitions_ok=len(runs))
-        if runs:
-            totals = [float(p.get('result', 0.0)) for p, _ in runs]
-            median_run = sorted(zip(totals, range(len(runs))))[len(runs) // 2][1]
-            plan_json = runs[median_run][0]
-            udf_times = [udf_operator_time(p, udf_name)[0] for p, _ in runs]
+    for qid, plan in queries:
+        udf_name = plan.udf.udf_name
+        ok = {p: r for p, r in runs_by_query[qid].items() if r[0] is not None}
+        row = dict(query_id=qid, workload=workload, udf=udf_name, sql=plan.query, threads=args.threads,
+                   pin_cpu=args.pin_cpu, passes_ok=len(ok))
+        for p in range(1, len(orders) + 1):
+            r = runs_by_query[qid].get(p)
+            row[f'total_time_p{p}_s'] = r[1] if r else None
+            row[f'udf_time_p{p}_s'] = r[2] if r else None
+        if ok:
+            totals = [r[1] for r in ok.values()]
+            udfs = [r[2] for r in ok.values()]
+            states = [r[3] for r in ok.values()]
+            total_s, udf_s = statistics.mean(totals), statistics.mean(udfs)
+            plan_json = ok[min(ok)][0]
             _, udf_ops, udf_rows_in = udf_operator_time(plan_json, udf_name)
-            total_s, udf_s = statistics.median(totals), statistics.median(udf_times)
+            freqs = [x['cpu_freq_min_mhz'] for x in states if x['cpu_freq_min_mhz'] is not None]
+            temps = [x['core_temp_max_c'] for x in states if x['core_temp_max_c'] is not None]
+            busy = [x['system_cpu_busy_pct'] for x in states if x['system_cpu_busy_pct'] is not None]
             row.update(total_time_s=total_s, udf_time_s=udf_s, sql_time_s=total_s - udf_s,
                        udf_share=udf_s / total_s if total_s > 0 else None,
+                       total_time_cv=statistics.pstdev(totals) / total_s if len(totals) > 1 and total_s > 0 else None,
                        udf_operator=' + '.join(udf_ops), rows_into_udf=udf_rows_in,
-                       total_time_runs_s=', '.join(f'{t:.4f}' for t in totals),
-                       udf_time_runs_s=', '.join(f'{t:.4f}' for t in udf_times))
+                       cpu_freq_min_mhz=min(freqs) if freqs else None,
+                       core_temp_max_c=max(temps) if temps else None,
+                       system_cpu_busy_max_pct=max(busy) if busy else None)
             g = plan_graph(plan_json, udf_name)
             nx.write_gpickle(g, os.path.join(out_dir, 'plans', f'{qid}.gpickle'))
             draw_plan(g, os.path.join(out_dir, 'plans', f'{qid}.png'),
-                      f'{qid}: total {total_s:.3f} s, UDF ({udf_name}) {udf_s:.3f} s')
+                      f'{qid}: total {total_s:.3f} s, UDF ({udf_name}) {udf_s:.3f} s (mean of {len(ok)} passes)')
             row.update(plan_gpickle=f'plans/{qid}.gpickle', plan_png=f'plans/{qid}.png')
         src = os.path.join(graphs_dir, f'{udf_name}.loopend.gpickle')
         if os.path.exists(src):
@@ -414,7 +557,6 @@ def profile_workload(db: str, workload: str, args, feature_statistics: dict, out
                 print(f'    UDF graph drawing failed: {e}', flush=True)
             row['udf_graph_gpickle'] = f'udf_graphs/{qid}.gpickle'
         rows.append(row)
-    con.close()
 
     sheets = {}
     for kind in ('baseline', 'augmented'):
@@ -434,13 +576,21 @@ def profile_workload(db: str, workload: str, args, feature_statistics: dict, out
 
 COLUMNS = ['query_id', 'workload', 'udf', 'udf_pos_in_query', 'num_joins', 'num_filters', 'udf_num_loops',
            'udf_num_branches', 'udf_num_comp_nodes', 'udf_num_np_calls', 'udf_num_math_calls', 'udf_in_card',
-           'threads', 'repetitions_ok', 'total_time_s', 'udf_time_s', 'sql_time_s', 'udf_share', 'udf_operator',
-           'rows_into_udf', 'graceful_runtime_s', 'predicted_runtime_s', 'q_error', 'total_time_runs_s',
-           'udf_time_runs_s', 'plan_gpickle', 'plan_png', 'udf_graph_gpickle', 'udf_graph_png', 'sql']
+           'threads', 'pin_cpu', 'passes_ok', 'total_time_s', 'udf_time_s', 'sql_time_s', 'udf_share', 'total_time_cv',
+           'udf_operator', 'rows_into_udf', 'graceful_runtime_s', 'predicted_runtime_s', 'q_error',
+           'total_time_p1_s', 'total_time_p2_s', 'total_time_p3_s', 'udf_time_p1_s', 'udf_time_p2_s', 'udf_time_p3_s',
+           'cpu_freq_min_mhz', 'core_temp_max_c', 'system_cpu_busy_max_pct',
+           'plan_gpickle', 'plan_png', 'udf_graph_gpickle', 'udf_graph_png', 'sql']
 
 ABOUT = [
-    ('total_time_s', 'Whole query time measured here (median of the repetitions), DuckDB 0.10.1, read-only GRACEFUL db file.'),
-    ('udf_time_s', 'Time of the plan operator(s) that call the UDF (udf_operator), median of the repetitions.'),
+    ('total_time_s', 'Whole query time measured here: mean over the passes (pass 1 in order, 2 reversed, 3 random), '
+                     'DuckDB 0.10.1, read-only GRACEFUL db file, pinned to one CPU (pin_cpu).'),
+    ('udf_time_s', 'Time of the plan operator(s) that call the UDF (udf_operator), mean over the passes.'),
+    ('total_time_pN_s / udf_time_pN_s', 'The single measurement from pass N.'),
+    ('total_time_cv', 'Standard deviation / mean of total_time over the passes: how stable the measurement was.'),
+    ('cpu_freq_min_mhz', 'Lowest clock of the pinned CPU seen during any pass of this query (base 2900, max 3900).'),
+    ('core_temp_max_c / system_cpu_busy_max_pct', "Hottest reading of the pinned CPU's core, and the highest system-wide "
+                                                   'CPU busy share, over the passes. Per run: <db>_<workload>_runs.csv.'),
     ('sql_time_s', 'total_time_s - udf_time_s.'),
     ('udf_share', 'udf_time_s / total_time_s: the fraction of the query spent in the UDF.'),
     ('threads', 'DuckDB threads. With 1, operator times are real seconds. With more, operator times are summed '
@@ -475,7 +625,7 @@ def main() -> int:
                     about.loc[len(about)] = ['model', names[kind]]
                     about.loc[len(about)] = ['settings', f'n_queries={args.n_queries or "all"} per workload, '
                                                          f'seed={args.seed}, threads={args.threads}, '
-                                                         f'repetitions={args.repetitions}']
+                                                         f'passes={args.passes}, pin_cpu={args.pin_cpu}']
                     about.to_excel(writer, sheet_name='about', index=False)
                     for wl, frame in per_kind[kind].items():
                         frame.to_excel(writer, sheet_name=wl, index=False)
