@@ -7,9 +7,11 @@ Figures (PNG + PDF):
   1_measurement_passes   how much a query's time varies across the 3 passes (coefficient of variation)
   2_machine_state        clock speed and core temperature over the whole run (no throttling check)
   3_runtime_vs_graceful  mean time per query, GRACEFUL's recorded runtime vs ours
-  4_q50_by_query_length  q50 of the baseline vs ours by query runtime, per DB and workload
+  4a_q50_by_query_time   q50 of the baseline vs ours by total query runtime, per DB and workload
+  4b_q50_by_udf_time     the same by the time spent in the UDF
   5_q50_by_udf_type      q50 of the baseline vs ours by where the UDF sits (WHERE / SELECT) and its control flow
-  6_udf_vs_sql_time      UDF time vs the rest of the query's time, one dot per query
+  6a_udf_vs_rest_of_query  UDF time vs the rest of the query's time, one dot per query
+  6b_udf_vs_total_time     UDF time vs total query time
 """
 import argparse
 import os
@@ -161,10 +163,12 @@ def fig_runtime(q, out_dir):
     save(fig, out_dir, '3_runtime_vs_graceful')
 
 
-def fig_length(q, out_dir):
+def fig_length(q, out_dir, by):
+    """by='query': buckets by total query time (4a); by='udf': by the time inside the UDF (4b)."""
+    col = 'total_time_s' if by == 'query' else 'udf_time_s'
     fig, axes = plt.subplots(2, 2, figsize=(12, 7.2))
     for ax, ((db, wl), d) in zip(axes.flat, q.items()):
-        d = d.assign(bucket=pd.cut(d.total_time_s, TIME_BINS, labels=TIME_LABELS))
+        d = d.assign(bucket=pd.cut(d[col], TIME_BINS, labels=TIME_LABELS, include_lowest=True))
         g = d.groupby('bucket', observed=True).agg(n=('q_error_base', 'size'), base=('q_error_base', 'median'),
                                                     ours=('q_error_ours', 'median'))
         g = g[g.n >= MIN_N]
@@ -172,11 +176,18 @@ def fig_length(q, out_dir):
         ax.set_title(f'{db} {WORKLOADS[wl]}', loc='left')
         ax.set_ylabel('q50 (median q-error)')
     fig.legend(*axes[0, 0].get_legend_handles_labels(), loc='upper right', ncol=2, bbox_to_anchor=(1, 1.0))
-    fig.suptitle('q50 by query runtime (this server), % = change vs the baseline', x=0.01, ha='left',
-                 fontsize=13, color='#26326c')
-    fig.text(0.01, -0.01, f'Runtime buckets with fewer than {MIN_N} queries are left out.', fontsize=9.5, color=INK2)
+    if by == 'query':
+        title = 'q50 by query runtime (whole query, this server), % = change vs the baseline'
+        note = 'Buckets: total time of the query (1 thread).'
+        name = '4a_q50_by_query_time'
+    else:
+        title = 'q50 by UDF runtime (time inside the UDF, this server), % = change vs the baseline'
+        note = 'Buckets: time spent in the UDF operator per query (1 thread). The q-error is of the whole query.'
+        name = '4b_q50_by_udf_time'
+    fig.suptitle(title, x=0.01, ha='left', fontsize=13, color='#26326c')
+    fig.text(0.01, -0.01, f'{note} Buckets with fewer than {MIN_N} queries are left out.', fontsize=9.5, color=INK2)
     fig.tight_layout()
-    save(fig, out_dir, '4_q50_by_query_length')
+    save(fig, out_dir, name)
 
 
 def fig_udf_type(q, out_dir):
@@ -202,10 +213,11 @@ def fig_udf_type(q, out_dir):
     save(fig, out_dir, '5_q50_by_udf_type')
 
 
-def fig_udf_sql(q, out_dir):
+def fig_udf_sql(q, out_dir, x):
+    """x='rest': UDF time vs the rest of the query (6a); x='total': UDF time vs total query time (6b)."""
     fig, axes = plt.subplots(1, 4, figsize=(14, 3.8), sharex=True, sharey=True)
     for ax, ((db, wl), d) in zip(axes, q.items()):
-        sql = d.sql_time_s.clip(lower=1e-4)
+        sql = (d.sql_time_s if x == 'rest' else d.total_time_s).clip(lower=1e-4)
         udf = d.udf_time_s.clip(lower=1e-4)
         ax.scatter(sql, udf, s=6, color=OURS, alpha=0.35, linewidths=0)
         lim = [1e-4, 60]
@@ -214,16 +226,23 @@ def fig_udf_sql(q, out_dir):
         ax.set_xlim(lim); ax.set_ylim(lim)
         rho = pd.Series(udf).rank().corr(pd.Series(sql).rank())
         ax.set_title(f'{db} {WORKLOADS[wl]}\nrank correlation {rho:.2f}', loc='left', fontsize=11)
-        ax.set_xlabel('rest of the query (s)')
+        ax.set_xlabel('rest of the query (s)' if x == 'rest' else 'total query time (s)')
     axes[0].set_ylabel('UDF time (s)')
-    axes[-1].text(50, 7e-5 * 2, 'equal time', fontsize=9, color=INK2, ha='right')
-    fig.suptitle('UDF time vs the rest of the query, one dot per query: the UDF dominates and the two barely move together',
-                 x=0.01, ha='left', fontsize=13, color='#26326c')
-    fig.text(0.01, -0.02, 'Dots above the dotted line: the UDF takes longer than the rest of the query. The low cluster '
-             '(UDF < 1 ms) is a UDF filter on a small table (median 27 rows into the UDF), where the joins take the time.',
-             fontsize=9.5, color=INK2)
+    cluster = ('The low cluster (UDF < 1 ms) is a UDF filter on a small table (median 27 rows into the UDF), where the '
+               'joins take the time.')
+    if x == 'rest':
+        title = 'UDF time vs the rest of the query, one dot per query: the UDF dominates and the two barely move together'
+        note = 'Dots above the dotted line: the UDF takes longer than the rest of the query. ' + cluster
+        name = '6a_udf_vs_rest_of_query'
+    else:
+        title = ('UDF time vs total query time, one dot per query: most dots sit on the line, i.e. the UDF is almost '
+                 'the whole query')
+        note = 'Dotted line: UDF time = total time (a dot cannot be above it). ' + cluster
+        name = '6b_udf_vs_total_time'
+    fig.suptitle(title, x=0.01, ha='left', fontsize=13, color='#26326c')
+    fig.text(0.01, -0.02, note, fontsize=9.5, color=INK2)
     fig.tight_layout()
-    save(fig, out_dir, '6_udf_vs_sql_time')
+    save(fig, out_dir, name)
 
 
 def main():
@@ -238,9 +257,11 @@ def main():
     fig_passes(q, out)
     fig_machine(runs, out)
     fig_runtime(q, out)
-    fig_length(q, out)
+    fig_length(q, out, 'query')
+    fig_length(q, out, 'udf')
     fig_udf_type(q, out)
-    fig_udf_sql(q, out)
+    fig_udf_sql(q, out, 'rest')
+    fig_udf_sql(q, out, 'total')
     print('figures written to', out)
 
 
