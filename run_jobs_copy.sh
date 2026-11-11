@@ -91,6 +91,11 @@ baseline() {  # label db card -- non-augmented reference model (LeakyReLU defaul
 #   3  movielens hybrid est              | geneea hybrid est
 #   4  imdb hybrid est cl2               | airline hybrid est
 #   5  financial hybrid est cl2 (resume) | carcinogenesis hybrid est
+# Queue B's 2026-11-06 list finished on 2026-11-10. Its next list (2026-11-10), tuning the near misses:
+#   baseball (+10.9% push / -0.4% pull) and accidents (-0.9% / +12.9%) get coarse_layers 2, which fixed pull-up on
+#   hepatitis and imdb; tournament gets the defaults with patience 20 (its only defaults run used patience 10, and
+#   patience 20 helped hepatitis and movielens). airline waits until its collapse (push q50 3.01 vs 1.37) is
+#   understood. (This copy was edited while queue A ran run_jobs.sh; run_jobs.sh gets the same list once A is idle.)
 # (later overrides win: env applies them in order, so CL2/L025 replace the values in $COMMON)
 CL2="AUGMENT_COARSE_LAYERS=2"
 L025="LAMBDA_STRUCT=0.25"
@@ -106,11 +111,9 @@ if [[ "$JOB_LIST" == A ]]; then
     job imdb-selu-hybrid-est-cl2          imdb           est $HYBRID $CL2
     job financial-selu-hybrid-est-cl2     financial      est $HYBRID $CL2 $RESUME_FINANCIAL
 else
-    job seznam-selu-hybrid-est-cl2        seznam         est $HYBRID $CL2 $RESUME_SEZNAM
-    job ssb-selu-hybrid-est               ssb            est $HYBRID
-    job geneea-selu-hybrid-est            geneea         est $HYBRID
-    job airline-selu-hybrid-est           airline        est $HYBRID
-    job carcinogenesis-selu-hybrid-est    carcinogenesis est $HYBRID
+    job baseball-selu-hybrid-est-cl2      baseball       est $HYBRID $CL2
+    job accidents-selu-hybrid-est-cl2     accidents      est $HYBRID $CL2
+    job tournament-selu-hybrid-est        tournament     est $HYBRID
 fi
 
 if [[ -n "$START_AT" ]]; then

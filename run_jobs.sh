@@ -91,8 +91,18 @@ baseline() {  # label db card -- non-augmented reference model (LeakyReLU defaul
 #   3  movielens hybrid est              | geneea hybrid est
 #   4  imdb hybrid est cl2               | airline hybrid est
 #   5  financial hybrid est cl2 (resume) | carcinogenesis hybrid est
+# Queue B's 2026-11-06 list finished on 2026-11-10. Its next list (2026-11-10), tuning the near misses:
+#   baseball (+10.9% push / -0.4% pull) and accidents (-0.9% / +12.9%) get coarse_layers 2, which fixed pull-up on
+#   hepatitis and imdb; tournament gets the defaults with patience 20 (its only defaults run used patience 10, and
+#   patience 20 helped hepatitis and movielens). airline waits until its collapse (push q50 3.01 vs 1.37) is
+#   understood. (run_jobs.sh got the same list on 2026-11-11, once queue A was idle.)
+# Queue A's 2026-11-06 list finished on 2026-11-11. Its next list (2026-11-11), one setting changed per run:
+#   financial: cl2 made pull-up worse (-12.7% vs -3.5% at the defaults), so try cl3 and, separately, lambda 0.25;
+#   ssb (pull -14.7%) and geneea (push -7.1%) get cl2; seznam gets lambda 0.25 (cl2 left its pull-up at -3.8%).
+#   (Written into run_jobs.sh while queue B ran run_jobs_copy.sh; the copy gets it once queue B is idle.)
 # (later overrides win: env applies them in order, so CL2/L025 replace the values in $COMMON)
 CL2="AUGMENT_COARSE_LAYERS=2"
+CL3="AUGMENT_COARSE_LAYERS=3"
 L025="LAMBDA_STRUCT=0.25"
 M=saved/models
 P=aug_est_complex_dd_pulluppushdown_ddestfonudf_liboh_gradnorm_mldupl_loopend_loopedge
@@ -100,17 +110,15 @@ S=bs512_ep100_esp20_maxr30_augpoolhybrid_augrefgated_residual_augcl2_augnoRET_au
 RESUME_SEZNAM="PRETRAINED_MODEL_ARTIFACT_DIR=$M/${P}_seznam_$S PRETRAINED_MODEL_FILENAME=${P}_seznam_${S}_20261104_234711_091"
 RESUME_FINANCIAL="PRETRAINED_MODEL_ARTIFACT_DIR=$M/${P}_financial_$S PRETRAINED_MODEL_FILENAME=${P}_financial_${S}_20261105_161959_089"
 if [[ "$JOB_LIST" == A ]]; then
-    job accidents-selu-hybrid-est         accidents      est $HYBRID
-    job baseball-selu-hybrid-est          baseball       est $HYBRID
-    job movielens-selu-hybrid-est         movielens      est $HYBRID
-    job imdb-selu-hybrid-est-cl2          imdb           est $HYBRID $CL2
-    job financial-selu-hybrid-est-cl2     financial      est $HYBRID $CL2 $RESUME_FINANCIAL
+    job financial-selu-hybrid-est-cl3     financial      est $HYBRID $CL3
+    job financial-selu-hybrid-est-l025    financial      est $HYBRID $L025
+    job ssb-selu-hybrid-est-cl2           ssb            est $HYBRID $CL2
+    job geneea-selu-hybrid-est-cl2        geneea         est $HYBRID $CL2
+    job seznam-selu-hybrid-est-l025       seznam         est $HYBRID $L025
 else
-    job seznam-selu-hybrid-est-cl2        seznam         est $HYBRID $CL2 $RESUME_SEZNAM
-    job ssb-selu-hybrid-est               ssb            est $HYBRID
-    job geneea-selu-hybrid-est            geneea         est $HYBRID
-    job airline-selu-hybrid-est           airline        est $HYBRID
-    job carcinogenesis-selu-hybrid-est    carcinogenesis est $HYBRID
+    job baseball-selu-hybrid-est-cl2      baseball       est $HYBRID $CL2
+    job accidents-selu-hybrid-est-cl2     accidents      est $HYBRID $CL2
+    job tournament-selu-hybrid-est        tournament     est $HYBRID
 fi
 
 if [[ -n "$START_AT" ]]; then
