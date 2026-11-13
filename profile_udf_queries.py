@@ -701,6 +701,7 @@ def read_clock_logs(run_root: str) -> pd.DataFrame:
         local = pd.to_datetime(df['time'], format='%m/%d/%Y %H:%M:%S.%f', errors='coerce')
         df['epoch'] = (local - pd.Timestamp('1970-01-01')).dt.total_seconds() - offset
         df['effective_mhz'] = df['freq_mhz'] * df['perf_pct'] / 100
+        df = df[df['perf_pct'] >= 0]  # typeperf writes -1 for a sample it could not read
         frames.append(df[['epoch', 'effective_mhz']].dropna())
     return pd.concat(frames, ignore_index=True).sort_values('epoch') if frames else pd.DataFrame()
 
