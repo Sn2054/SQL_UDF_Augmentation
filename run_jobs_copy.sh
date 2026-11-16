@@ -96,8 +96,17 @@ baseline() {  # label db card -- non-augmented reference model (LeakyReLU defaul
 #   hepatitis and imdb; tournament gets the defaults with patience 20 (its only defaults run used patience 10, and
 #   patience 20 helped hepatitis and movielens). airline waits until its collapse (push q50 3.01 vs 1.37) is
 #   understood. (This copy was edited while queue A ran run_jobs.sh; run_jobs.sh gets the same list once A is idle.)
+# Queue B's 2026-11-10 list finished on 2026-11-13 (accidents cl2 met the goal; baseball cl2 +0.9%, tournament defaults
+#   at patience 20 +5.0% / +5.0%, 4.99% overall). Its next list (2026-11-13): every DB still short of the goal that
+#   queue A doesn't cover (geneea, seznam), one setting changed from the defaults per run:
+#   baseball lambda 0.25 (cl1 +10.9% / -0.4%; cl2 hurt pull-up); tournament cl3 (cl2 +8.2% / -1.2%); ssb cl3 (cl2
+#   lifted pull-up from -14.7% to -3.1%, and cl3 fixed financial's pull-up); basketball and consumer at the defaults
+#   (never run with hybrid + SELU); carcinogenesis cl2 (defaults -13.4%; cl2 fixed hepatitis and imdb); airline at the
+#   defaults (our run collapsed on push-down, 3.01 vs 1.37). Order: the DBs never run with hybrid + SELU first
+#   (basketball, consumer), then the rest; tournament last, since its 4.99% run is already in best_results.
 # (later overrides win: env applies them in order, so CL2/L025 replace the values in $COMMON)
 CL2="AUGMENT_COARSE_LAYERS=2"
+CL3="AUGMENT_COARSE_LAYERS=3"
 L025="LAMBDA_STRUCT=0.25"
 M=saved/models
 P=aug_est_complex_dd_pulluppushdown_ddestfonudf_liboh_gradnorm_mldupl_loopend_loopedge
@@ -111,9 +120,13 @@ if [[ "$JOB_LIST" == A ]]; then
     job imdb-selu-hybrid-est-cl2          imdb           est $HYBRID $CL2
     job financial-selu-hybrid-est-cl2     financial      est $HYBRID $CL2 $RESUME_FINANCIAL
 else
-    job baseball-selu-hybrid-est-cl2      baseball       est $HYBRID $CL2
-    job accidents-selu-hybrid-est-cl2     accidents      est $HYBRID $CL2
-    job tournament-selu-hybrid-est        tournament     est $HYBRID
+    job basketball-selu-hybrid-est        basketball     est $HYBRID
+    job consumer-selu-hybrid-est          consumer       est $HYBRID
+    job baseball-selu-hybrid-est-l025     baseball       est $HYBRID $L025
+    job ssb-selu-hybrid-est-cl3           ssb            est $HYBRID $CL3
+    job carcinogenesis-selu-hybrid-est-cl2 carcinogenesis est $HYBRID $CL2
+    job airline-selu-hybrid-est           airline        est $HYBRID
+    job tournament-selu-hybrid-est-cl3    tournament     est $HYBRID $CL3
 fi
 
 if [[ -n "$START_AT" ]]; then

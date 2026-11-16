@@ -100,21 +100,25 @@ baseline() {  # label db card -- non-augmented reference model (LeakyReLU defaul
 #   financial: cl2 made pull-up worse (-12.7% vs -3.5% at the defaults), so try cl3 and, separately, lambda 0.25;
 #   ssb (pull -14.7%) and geneea (push -7.1%) get cl2; seznam gets lambda 0.25 (cl2 left its pull-up at -3.8%).
 #   (Written into run_jobs.sh while queue B ran run_jobs_copy.sh; the copy gets it once queue B is idle.)
+# Queue A's 2026-11-11 list finished on 2026-11-15 (geneea cl2 +0.4% / +8.2%, 4.3% overall; seznam lambda 0.25
+#   +13.3% / -0.9%). Its next list (2026-11-16), one setting changed per run, following each DB's trend:
+#   geneea cl3 (cl1 -3.4% -> cl2 +4.3% overall; cl3 fixed financial's pull-up); basketball cl2 (defaults +2.0% /
+#   +6.0%; cl2 fixed pull-up on hepatitis, imdb and accidents); seznam lambda 0.5 (pull-up -3.8% at lambda 0.1,
+#   -0.9% at 0.25). (Written into run_jobs.sh while queue B runs run_jobs_copy.sh; queue B's own list is in the copy.)
 # (later overrides win: env applies them in order, so CL2/L025 replace the values in $COMMON)
 CL2="AUGMENT_COARSE_LAYERS=2"
 CL3="AUGMENT_COARSE_LAYERS=3"
 L025="LAMBDA_STRUCT=0.25"
+L05="LAMBDA_STRUCT=0.5"
 M=saved/models
 P=aug_est_complex_dd_pulluppushdown_ddestfonudf_liboh_gradnorm_mldupl_loopend_loopedge
 S=bs512_ep100_esp20_maxr30_augpoolhybrid_augrefgated_residual_augcl2_augnoRET_augseq_augcfge_cfl0.1_actSELU
 RESUME_SEZNAM="PRETRAINED_MODEL_ARTIFACT_DIR=$M/${P}_seznam_$S PRETRAINED_MODEL_FILENAME=${P}_seznam_${S}_20261104_234711_091"
 RESUME_FINANCIAL="PRETRAINED_MODEL_ARTIFACT_DIR=$M/${P}_financial_$S PRETRAINED_MODEL_FILENAME=${P}_financial_${S}_20261105_161959_089"
 if [[ "$JOB_LIST" == A ]]; then
-    job financial-selu-hybrid-est-cl3     financial      est $HYBRID $CL3
-    job financial-selu-hybrid-est-l025    financial      est $HYBRID $L025
-    job ssb-selu-hybrid-est-cl2           ssb            est $HYBRID $CL2
-    job geneea-selu-hybrid-est-cl2        geneea         est $HYBRID $CL2
-    job seznam-selu-hybrid-est-l025       seznam         est $HYBRID $L025
+    job geneea-selu-hybrid-est-cl3        geneea         est $HYBRID $CL3
+    job basketball-selu-hybrid-est-cl2    basketball     est $HYBRID $CL2
+    job seznam-selu-hybrid-est-l05        seznam         est $HYBRID $L05
 else
     job baseball-selu-hybrid-est-cl2      baseball       est $HYBRID $CL2
     job accidents-selu-hybrid-est-cl2     accidents      est $HYBRID $CL2
