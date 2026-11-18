@@ -100,13 +100,15 @@ HOST = socket.gethostname()
 MODELS = {
     'employee': {'baseline': ('20261015_021247_014', 'paper_est_20261015_021244_3186075_run01.log'),
                  'augmented': ('20261026_202734_018', 'paper_est_20261026_202730_523164_run01.log')},
+    # augmented = each database's best hybrid + SELU checkpoint (2026-11-18): financial cl3 (the lab PC sample was first
+    # predicted with the cl1 run 20261027_213157_021), seznam lambda 0.25 (first: cl1 patience 10, 20261028_120105_053)
     'financial': {'baseline': ('20261015_070416_058', 'paper_est_20261015_070413_3374010_run01.log'),
-                  'augmented': ('20261027_213157_021', 'paper_est_20261027_213153_2064398_run01.log')},
+                  'augmented': ('20261111_165511_038', 'paper_est_20261111_165505_4033033_run01.log')},
     'fhnk': {'baseline': ('20261014_200658_030', 'paper_est_20261014_200654_2889800_run01.log'),
              'augmented': ('20261026_212002_085', 'paper_est_20261026_211958_598907_run01.log')},
     # seznam baseline: Ishana's run (est, 50 epochs, time_stamp 20261017_211513_743446), from the second transfer zip.
     'seznam': {'baseline': ('20261017_211517_086', 'paper_est_20261017_211513_743446_run01.log'),
-               'augmented': ('20261028_120105_053', 'paper_est_20261028_120101_2917524_run01.log')},
+               'augmented': ('20261114_160653_041', 'paper_est_20261114_160646_1939962_run01.log')},
 }
 
 # Progress file columns: one line per finished execution (a repetition or a pass).
