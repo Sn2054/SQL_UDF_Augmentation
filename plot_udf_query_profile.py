@@ -75,7 +75,7 @@ def bars(ax, labels, base, ours, ns=None, gain=True):
     x = np.arange(len(labels))
     w = 0.38
     ax.bar(x - w / 2 - 0.01, base, w, color=BASE, label='Baseline')
-    ax.bar(x + w / 2 + 0.01, ours, w, color=OURS, label='Ours (augmented)')
+    ax.bar(x + w / 2 + 0.01, ours, w, color=OURS, label='Augmented')
     top = max(max(base), max(ours))
     for i in range(len(labels)):
         if gain:
@@ -149,7 +149,7 @@ def fig_runtime(q, out_dir):
     w = 0.38
     fig, ax = plt.subplots(figsize=(8, 3.8))
     ax.bar(x - w / 2 - 0.01, g, w, color=GRACEFUL, label='GRACEFUL (recorded runtime)')
-    ax.bar(x + w / 2 + 0.01, o, w, color=OURS, label='Ours (this server, mean of 3 passes)')
+    ax.bar(x + w / 2 + 0.01, o, w, color=OURS, label='Lab server (1 thread, mean of 3 passes)')
     for i in range(len(x)):
         ax.text(x[i] - w / 2, g[i] + 0.15, f'{g[i]:.2f} s', ha='center', fontsize=10, color=INK)
         ax.text(x[i] + w / 2, o[i] + 0.15, f'{o[i]:.2f} s', ha='center', fontsize=10, color=INK)
