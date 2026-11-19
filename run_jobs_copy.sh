@@ -95,7 +95,16 @@ baseline() {  # label db card -- non-augmented reference model (LeakyReLU defaul
 #   baseball (+10.9% push / -0.4% pull) and accidents (-0.9% / +12.9%) get coarse_layers 2, which fixed pull-up on
 #   hepatitis and imdb; tournament gets the defaults with patience 20 (its only defaults run used patience 10, and
 #   patience 20 helped hepatitis and movielens). airline waits until its collapse (push q50 3.01 vs 1.37) is
-#   understood. (This copy was edited while queue A ran run_jobs.sh; run_jobs.sh gets the same list once A is idle.)
+#   understood. (run_jobs.sh got the same list on 2026-11-11, once queue A was idle.)
+# Queue A's 2026-11-06 list finished on 2026-11-11. Its next list (2026-11-11), one setting changed per run:
+#   financial: cl2 made pull-up worse (-12.7% vs -3.5% at the defaults), so try cl3 and, separately, lambda 0.25;
+#   ssb (pull -14.7%) and geneea (push -7.1%) get cl2; seznam gets lambda 0.25 (cl2 left its pull-up at -3.8%).
+#   (Written into run_jobs.sh while queue B ran run_jobs_copy.sh; the copy gets it once queue B is idle.)
+# Queue A's 2026-11-11 list finished on 2026-11-15 (geneea cl2 +0.4% / +8.2%, 4.3% overall; seznam lambda 0.25
+#   +13.3% / -0.9%). Its next list (2026-11-16), one setting changed per run, following each DB's trend:
+#   geneea cl3 (cl1 -3.4% -> cl2 +4.3% overall; cl3 fixed financial's pull-up); basketball cl2 (defaults +2.0% /
+#   +6.0%; cl2 fixed pull-up on hepatitis, imdb and accidents); seznam lambda 0.5 (pull-up -3.8% at lambda 0.1,
+#   -0.9% at 0.25). (Written into run_jobs.sh while queue B runs run_jobs_copy.sh; queue B's own list is in the copy.)
 # Queue B's 2026-11-10 list finished on 2026-11-13 (accidents cl2 met the goal; baseball cl2 +0.9%, tournament defaults
 #   at patience 20 +5.0% / +5.0%, 4.99% overall). Its next list (2026-11-13): every DB still short of the goal that
 #   queue A doesn't cover (geneea, seznam), one setting changed from the defaults per run:
@@ -104,27 +113,32 @@ baseline() {  # label db card -- non-augmented reference model (LeakyReLU defaul
 #   (never run with hybrid + SELU); carcinogenesis cl2 (defaults -13.4%; cl2 fixed hepatitis and imdb); airline at the
 #   defaults (our run collapsed on push-down, 3.01 vs 1.37). Order: the DBs never run with hybrid + SELU first
 #   (basketball, consumer), then the rest; tournament last, since its 4.99% run is already in best_results.
+# 2026-11-18: both queues stopped at about 17:16 / 17:30 (no error in the logs). basketball cl2 had finished
+#   training and testing (push +19.4%, pull -3.9%) but its results row was not written, so queue A re-tests it from the
+#   finished checkpoint (training is skipped). ssb cl3 ended +1.9% / +7.1% (cl1 -4.6%, cl2 -2.5% overall), so ssb gets
+#   cl4; geneea cl3 was worse than cl2 (-8.5% / +2.0%), so geneea gets lambda 0.25 (it lifted the lagging workload on
+#   baseball and seznam). Queue B resumes carcinogenesis cl2 from its epoch-27 checkpoint, then airline, tournament cl3.
 # (later overrides win: env applies them in order, so CL2/L025 replace the values in $COMMON)
 CL2="AUGMENT_COARSE_LAYERS=2"
 CL3="AUGMENT_COARSE_LAYERS=3"
 L025="LAMBDA_STRUCT=0.25"
+L05="LAMBDA_STRUCT=0.5"
+CL4="AUGMENT_COARSE_LAYERS=4"
 M=saved/models
 P=aug_est_complex_dd_pulluppushdown_ddestfonudf_liboh_gradnorm_mldupl_loopend_loopedge
 S=bs512_ep100_esp20_maxr30_augpoolhybrid_augrefgated_residual_augcl2_augnoRET_augseq_augcfge_cfl0.1_actSELU
 RESUME_SEZNAM="PRETRAINED_MODEL_ARTIFACT_DIR=$M/${P}_seznam_$S PRETRAINED_MODEL_FILENAME=${P}_seznam_${S}_20261104_234711_091"
 RESUME_FINANCIAL="PRETRAINED_MODEL_ARTIFACT_DIR=$M/${P}_financial_$S PRETRAINED_MODEL_FILENAME=${P}_financial_${S}_20261105_161959_089"
+# basketball cl2: finished checkpoint (re-test only); carcinogenesis cl2: stopped after epoch 27 (2026-11-18)
+RESUME_BASKETBALL="PRETRAINED_MODEL_ARTIFACT_DIR=$M/${P}_basketball_$S PRETRAINED_MODEL_FILENAME=${P}_basketball_${S}_20261117_160430_018"
+RESUME_CARCINOGENESIS="PRETRAINED_MODEL_ARTIFACT_DIR=$M/${P}_carcinogenesis_$S PRETRAINED_MODEL_FILENAME=${P}_carcinogenesis_${S}_20261118_102540_094"
 if [[ "$JOB_LIST" == A ]]; then
-    job accidents-selu-hybrid-est         accidents      est $HYBRID
-    job baseball-selu-hybrid-est          baseball       est $HYBRID
-    job movielens-selu-hybrid-est         movielens      est $HYBRID
-    job imdb-selu-hybrid-est-cl2          imdb           est $HYBRID $CL2
-    job financial-selu-hybrid-est-cl2     financial      est $HYBRID $CL2 $RESUME_FINANCIAL
+    job basketball-selu-hybrid-est-cl2    basketball     est $HYBRID $CL2 $RESUME_BASKETBALL
+    job seznam-selu-hybrid-est-l05        seznam         est $HYBRID $L05
+    job geneea-selu-hybrid-est-l025       geneea         est $HYBRID $L025
+    job ssb-selu-hybrid-est-cl4           ssb            est $HYBRID $CL4
 else
-    job basketball-selu-hybrid-est        basketball     est $HYBRID
-    job consumer-selu-hybrid-est          consumer       est $HYBRID
-    job baseball-selu-hybrid-est-l025     baseball       est $HYBRID $L025
-    job ssb-selu-hybrid-est-cl3           ssb            est $HYBRID $CL3
-    job carcinogenesis-selu-hybrid-est-cl2 carcinogenesis est $HYBRID $CL2
+    job carcinogenesis-selu-hybrid-est-cl2 carcinogenesis est $HYBRID $CL2 $RESUME_CARCINOGENESIS
     job airline-selu-hybrid-est           airline        est $HYBRID
     job tournament-selu-hybrid-est-cl3    tournament     est $HYBRID $CL3
 fi
