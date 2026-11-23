@@ -132,15 +132,22 @@ RESUME_FINANCIAL="PRETRAINED_MODEL_ARTIFACT_DIR=$M/${P}_financial_$S PRETRAINED_
 # basketball cl2: finished checkpoint (re-test only); carcinogenesis cl2: stopped after epoch 27 (2026-11-18)
 RESUME_BASKETBALL="PRETRAINED_MODEL_ARTIFACT_DIR=$M/${P}_basketball_$S PRETRAINED_MODEL_FILENAME=${P}_basketball_${S}_20261117_160430_018"
 RESUME_CARCINOGENESIS="PRETRAINED_MODEL_ARTIFACT_DIR=$M/${P}_carcinogenesis_$S PRETRAINED_MODEL_FILENAME=${P}_carcinogenesis_${S}_20261118_102540_094"
+# 2026-11-20 lists: run from run_jobs_next.sh (a temporary copy with only these lists, since both drivers were still
+#   running) from 2026-11-21 01:23 (B, after tournament cl3) and 17:30 (A, after ssb cl4). tournament cl3 ended
+#   +3.7% / +2.5% (defaults at patience 20 stay its best), ssb cl4 +8.4% / -1.5% (cl3 stays best). One setting changed
+#   per run from each DB's best run:
+#   B: carcinogenesis cl3 (cl2 beat cl1 in every short-query bin of pull-up): +4.6% / -4.7%, pull-up still behind;
+#      airline lambda 0.5 (defaults collapsed on push-down; lambda 0.5 took seznam's pull-up from -3.8% to +5.8%):
+#      -214% / -16.4%, worse than defaults on both.
+#   A: geneea cl2 + lambda 0.25 (cl2 is its best, +4.3% overall): +2.9% / +2.4%, below cl2 at lambda 0.1;
+#      basketball lambda 0.25 (defaults +2.0% / +6.0%; lambda 0.25 fixed baseball's pull-up), last as it may not
+#      finish before the GPU allocation ends on 2026-11-23.
 if [[ "$JOB_LIST" == A ]]; then
-    job basketball-selu-hybrid-est-cl2    basketball     est $HYBRID $CL2 $RESUME_BASKETBALL
-    job seznam-selu-hybrid-est-l05        seznam         est $HYBRID $L05
-    job geneea-selu-hybrid-est-l025       geneea         est $HYBRID $L025
-    job ssb-selu-hybrid-est-cl4           ssb            est $HYBRID $CL4
+    job geneea-selu-hybrid-est-cl2-l025     geneea         est $HYBRID $CL2 $L025
+    job basketball-selu-hybrid-est-l025     basketball     est $HYBRID $L025
 else
-    job carcinogenesis-selu-hybrid-est-cl2 carcinogenesis est $HYBRID $CL2 $RESUME_CARCINOGENESIS
-    job airline-selu-hybrid-est           airline        est $HYBRID
-    job tournament-selu-hybrid-est-cl3    tournament     est $HYBRID $CL3
+    job carcinogenesis-selu-hybrid-est-cl3  carcinogenesis est $HYBRID $CL3
+    job airline-selu-hybrid-est-l05         airline        est $HYBRID $L05
 fi
 
 if [[ -n "$START_AT" ]]; then
