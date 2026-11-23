@@ -1,7 +1,13 @@
 """Figures for the lab PC runtime measurement (profile_udf_queries.py, runs 1 and 2). CPU only, reads spreadsheets.
 
     CUDA_VISIBLE_DEVICES="" python plot_labpc_runtime.py \
-        --profile_dir results/udf_query_profile_labpc --out_dir results/udf_query_profile_labpc/figures
+        --profile_dir results/udf_query_profile_labpc --out_dir results/udf_query_profile_labpc/figures_all
+    (add --bare --out_dir .../figures_all_slides for the slide versions)
+
+Since 2026-11-20 the sheets cover every test query (sample 2026-11-12 to 11-14, the remaining push-down queries
+2026-11-18 to 11-20, resumed into the same files) and already carry both models' predictions from the best
+checkpoints (labpc_results/predictions_all), so no prediction override is needed. Each run has one clock log per
+timing session; figure 2 draws them one after the other.
 
 Run 1 (graceful_threads12/): GRACEFUL's procedure, 12 threads -> figure 3 (our time vs GRACEFUL's label).
 Run 2 (passes_threads1/):    1 thread, 3 passes, real seconds -> every other figure.
@@ -46,7 +52,7 @@ RUN1, RUN2 = 'graceful_threads12', 'passes_threads1'
 OVERRIDDEN = set()
 BARE = False
 DROP_SMALL = False   # slide versions leave out groups with fewer than MIN_N queries
-SAMPLE = ('Queries: per database a seeded sample of 1,000 push-down test queries and all pull-up test queries. '
+SAMPLE = ('Queries: every push-down and pull-up test query of each database. '
           'q-error = max(pred / label, label / pred) against GRACEFUL\'s recorded runtime. Augmented: our best hybrid + '
           'SELU checkpoint per database.')
 MACHINE = 'Lab PC: AMD Ryzen 5 7500F (1 socket, 6 cores / 12 threads), clock capped at ~2.41 GHz, boost off.'
@@ -90,7 +96,12 @@ def load(profile_dir, run, ours_override=None):
                 a = n[['query_id', 'predicted_runtime_s', 'q_error']]
                 OVERRIDDEN.add(db)
             d = b.merge(a, on='query_id', suffixes=('_base', '_ours'))
-            assert len(d) == len(b) == len(a) and (d.status == 'ok').all(), (run, db, wl)
+            # a query is usable when at least one timed run succeeded (one seznam query in run 2 failed 2 of its 3
+            # passes with a UDF ZeroDivisionError that depends on DuckDB's run-time filter order; its time is pass 3's)
+            part = d[(d.status != 'ok')]
+            assert len(d) == len(b) == len(a) and (part.runs_ok >= 1).all() and d.total_time_s.notna().all(), (run, db, wl)
+            for _, r in part.iterrows():
+                print(f'{run} {db} {wl}: {r.query_id} timed in {r.runs_ok} of {r.runs_total} runs ({r.status[:60]}...)')
             q[db, wl] = d
     return q
 
@@ -100,13 +111,16 @@ def load_runs(profile_dir, run):
 
 
 def load_clock(profile_dir, run):
-    f = sorted(glob.glob(f'{profile_dir}/{run}/clock_*.csv'))[0]
-    c = pd.read_csv(f)
-    c.columns = ['time', 'perf_pct', 'freq_mhz']
-    c = c[(c.perf_pct >= 0) & (c.freq_mhz >= 0)]          # typeperf writes -1 when it has no sample
-    c['time'] = pd.to_datetime(c.time, format='%m/%d/%Y %H:%M:%S.%f')
-    c['mhz'] = c.freq_mhz * c.perf_pct / 100
-    return c
+    """One frame per timing session (clock_<start>.csv), in time order."""
+    out = []
+    for f in sorted(glob.glob(f'{profile_dir}/{run}/clock_*.csv')):
+        c = pd.read_csv(f)
+        c.columns = ['time', 'perf_pct', 'freq_mhz']
+        c = c[(c.perf_pct >= 0) & (c.freq_mhz >= 0)]          # typeperf writes -1 when it has no sample
+        c['time'] = pd.to_datetime(c.time, format='%m/%d/%Y %H:%M:%S.%f')
+        c['mhz'] = c.freq_mhz * c.perf_pct / 100
+        out.append(c)
+    return out
 
 
 def save(fig, out_dir, name):
@@ -181,7 +195,7 @@ def binned(d, col):
 def fig_passes(q, out):
     fig, axes, cells = grid8((16, 6.4), sharex=True, sharey=True)
     for (db, wl), ax in cells:
-        cv = q[db, wl].total_time_cv.clip(lower=1e-4) * 100
+        cv = q[db, wl].total_time_cv.dropna().clip(lower=1e-4) * 100     # NaN: a query with only one successful pass
         ax.hist(cv, bins=np.logspace(-2, 2, 41), color=OURS, edgecolor=SURFACE, linewidth=0.6,
                 weights=np.full(len(cv), 100 / len(cv)))
         ax.set_xscale('log')
@@ -194,7 +208,7 @@ def fig_passes(q, out):
         ax.set_xlabel("spread of a query's 3 runs (%)")
     for ax in axes[:, 0]:
         ax.set_ylabel('% of queries')
-    allcv = pd.concat([d.total_time_cv for d in q.values()])
+    allcv = pd.concat([d.total_time_cv.dropna() for d in q.values()])
     title(fig, f'Each query was run 3 times (in order, reversed, random): median spread {100 * allcv.median():.2f}%',
           "x: standard deviation of a query's 3 total times as a % of their mean (e.g. 1.00, 1.01 and 0.99 s give "
           'about 1%). 1 DuckDB thread, pinned to one CPU. ' + MACHINE)
@@ -206,24 +220,36 @@ def fig_clock(profile_dir, runs1, runs2, out):
     fig, axes = plt.subplots(2, 1, figsize=(12, 5.2))
     for ax, run, runs, name in [(axes[0], RUN1, runs1, 'Run 1: GRACEFUL\'s procedure, 12 threads'),
                                 (axes[1], RUN2, runs2, 'Run 2: our procedure, 1 thread, 3 passes')]:
-        c = load_clock(profile_dir, run)
-        t0 = c.time.min()
-        h = (c.time - t0).dt.total_seconds() / 3600
-        ax.plot(h, c.mhz / 1000, color=OURS, linewidth=0.5)
+        sessions = load_clock(profile_dir, run)
+        offset, i = 0.0, 0
+        for s_no, c in enumerate(sessions):
+            t0 = c.time.min()
+            h = offset + (c.time - t0).dt.total_seconds() / 3600
+            ax.plot(h, c.mhz / 1000, color=OURS, linewidth=0.5)
+            if s_no:
+                ax.axvline(offset, color=INK2, linewidth=1.2, linestyle='--')
+                ax.text(offset + 0.15, 3.25, f'resumed {t0:%m-%d %H:%M}', fontsize=8.5, color=INK2, va='top')
+            # where each database / workload starts in this session (runs CSV: Unix epochs; clock log: KST)
+            e0 = pd.Timestamp(t0).tz_localize('Asia/Seoul').timestamp()
+            e1 = pd.Timestamp(c.time.max()).tz_localize('Asia/Seoul').timestamp()
+            starts = sorted((e[(e >= e0) & (e <= e1)].min(), k) for k, r in runs.items()
+                            for e in [r.start_epoch] if ((e >= e0) & (e <= e1)).any())
+            for e, (db, wl) in starts:
+                x = offset + (e - e0) / 3600
+                ax.axvline(x, color=GRID, linewidth=1.5, zorder=0)
+                ax.text(x + 0.05, [0.15, 0.65, 1.15][i % 3], f'{db}\n{WORKLOADS[wl]}', fontsize=8, color=INK2,
+                        bbox=dict(boxstyle='round,pad=0.1', facecolor=SURFACE, edgecolor='none', alpha=0.85))
+                i += 1
+            offset = h.max()
+        c = pd.concat(sessions)
+        ax.set_xlim(0, offset)
         ax.set_ylim(0, 4)
         ax.set_ylabel('clock (GHz)')
         ax.axhline(3.7, color=INK2, linewidth=1, linestyle=':')
-        ax.text(h.max(), 3.6, 'base clock 3.7 GHz (uncapped)', ha='right', va='top', fontsize=9, color=INK2)
-        # where each database / workload starts (runs CSV: Unix epochs; clock log: Windows local time, KST)
-        starts = sorted((r.start_epoch.min(), k) for k, r in runs.items())
-        epoch0 = pd.Timestamp(t0).tz_localize('Asia/Seoul').timestamp()
-        for i, (e, (db, wl)) in enumerate(starts):
-            x = (e - epoch0) / 3600
-            ax.axvline(x, color=GRID, linewidth=1.5, zorder=0)
-            ax.text(x + 0.05, 0.25 if i % 2 == 0 else 0.75, f'{db}\n{WORKLOADS[wl]}', fontsize=8, color=INK2)
-        ax.set_title(f'{name}: median {c.mhz.median() / 1000:.2f} GHz over {len(c):,} one-second samples',
-                     loc='left', fontsize=11)
-    axes[1].set_xlabel('hours since the start of the run')
+        ax.text(offset, 3.6, 'base clock 3.7 GHz (uncapped)', ha='right', va='top', fontsize=9, color=INK2)
+        ax.set_title(f'{name}: median {c.mhz.median() / 1000:.2f} GHz over {len(c):,} one-second samples '
+                     f'({len(sessions)} sessions)', loc='left', fontsize=11)
+    axes[1].set_xlabel('hours of measurement (sessions drawn one after the other)')
     title(fig, 'The CPU clock stayed at the ~2.41 GHz cap through both runs',
           'Clock = Windows "Processor Frequency" x "% Processor Performance" / 100, logged every second on the '
           'Windows host (WSL cannot read the clock or the temperature). Cap: Windows maximum processor state 54%, '
@@ -286,7 +312,7 @@ def fig_runtime(q1, out, rows):
     for ax in axes[:, 0]:
         ax.set_ylabel('lab PC, run 1 (s)')
     title(fig, "One dot per query: our time follows GRACEFUL's label at a near-constant factor",
-          'Dotted: ours = label. Orange: ours = median ratio x label. Rank correlation = Spearman. Run 1 (GRACEFUL\'s '
+          'Dotted: lab PC = label. Orange: lab PC = median ratio x label. Rank correlation = Spearman. Run 1 (GRACEFUL\'s '
           'procedure, 12 threads). ' + MACHINE)
     fig.tight_layout()
     save(fig, out, '3b_runtime_vs_graceful_per_query')
@@ -304,7 +330,7 @@ def fig_binned(q, out, col, name, head, note, rows):
     for ax in axes[:, 0]:
         ax.set_ylabel('q50 (median q-error)')
     figlegend(fig, *axes[0, 0].get_legend_handles_labels(), loc='upper right', ncol=2, bbox_to_anchor=(1, 1.0))
-    title(fig, head, f'{note} % = change of q50 vs the baseline (positive = ours better). * and faded: fewer than '
+    title(fig, head, f'{note} % = change of q50 vs the baseline (positive = augmented better). * and faded: fewer than '
           f'{MIN_N} queries, too few to read. Run 2 (1 thread). {SAMPLE}')
     fig.tight_layout()
     save(fig, out, name)
@@ -465,7 +491,7 @@ def fig_scatter(q, out):
           'x: time inside the UDF operator (run 2, 1 thread, real seconds); y: the whole query\'s q-error. Lines: '
           'median q-error (q50) per UDF-time bin, drawn at the bin\'s median UDF time; hollow: bins with fewer than '
           f'{MIN_N} queries, too few to read; n = queries per bin. Grey band: '
-          f'UDF under 1 ms (figure 8). Title: q50 baseline -> ours on these queries. {SAMPLE}')
+          f'UDF under 1 ms (figure 8). Title: q50 baseline -> augmented on these queries. {SAMPLE}')
     fig.tight_layout()
     save(fig, out, '7_qerror_vs_udf_time')
     for db in DBS:
@@ -587,9 +613,10 @@ def main():
     p = argparse.ArgumentParser()
     p.add_argument('--profile_dir', default='results/udf_query_profile_labpc')
     p.add_argument('--out_dir', default=None)
-    p.add_argument('--ours_predictions', default='results/udf_query_profile_labpc/newer_checkpoints/predictions',
-                   help='newer augmented predictions that replace the sheet\'s (per database, where present); '
-                        '"" to use the sheets as they are')
+    p.add_argument('--ours_predictions', default='',
+                   help='a folder of newer augmented predictions that replace the sheet\'s (per database, where present); '
+                        'default "": the full-data sheets already hold the best checkpoints\' predictions. The sample '
+                        'figures (2026-11-16) used results/udf_query_profile_labpc/newer_checkpoints/predictions')
     p.add_argument('--bare', action='store_true', help='no figure title or note (for slides)')
     args = p.parse_args()
     global BARE, DROP_SMALL
