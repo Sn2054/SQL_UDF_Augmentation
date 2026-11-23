@@ -142,12 +142,27 @@ RESUME_CARCINOGENESIS="PRETRAINED_MODEL_ARTIFACT_DIR=$M/${P}_carcinogenesis_$S P
 #   A: geneea cl2 + lambda 0.25 (cl2 is its best, +4.3% overall): +2.9% / +2.4%, below cl2 at lambda 0.1;
 #      basketball lambda 0.25 (defaults +2.0% / +6.0%; lambda 0.25 fixed baseball's pull-up), last as it may not
 #      finish before the GPU allocation ends on 2026-11-23.
+# 2026-11-23 lists (GPUs extended by the user; ~24 h per run, so in priority order). basketball lambda 0.25 ran last
+#   on A from run_jobs_next.sh: +21.1% / -1.8% (cl1 lambda 0.1 stays its best). One setting changed from a DB's best
+#   run, except where noted:
+#   carcinogenesis cl2 + lambda 0.25 / 0.5: more coarse layers stopped helping pull-up (cl1 -11.8%, cl2 -2.7%,
+#     cl3 -4.7%); lambda is what fixed pull-up on seznam (0.5) and baseball (0.25).
+#   airline attention, then max (user, 2026-11-23): does another pooling avoid the push-down collapse? hybrid
+#     at the defaults gave push q50 3.01 / 3.80 here (patience 20) but 1.31 in Ishana's run (patience 10), so
+#     one run per pooling is a weak comparison.
+#   ssb cl4 + lambda 0.25 (two changes from its best, cl3): cl4 gave push +8.4% but pull -1.5%; lambda 0.25 aims
+#     at the pull-up.
+#   airline defaults with patience 10: the same settings as the team's run on the second server (push q50 1.31),
+#     whose only difference from ours (3.01, 3.80) is patience 10 vs 20. Replaces basketball cl2 + lambda 0.25,
+#     dropped because lambda 0.25 lowered basketball's pull-up (+6.0% -> -1.8%) just as cl2 did (-3.9%).
 if [[ "$JOB_LIST" == A ]]; then
-    job geneea-selu-hybrid-est-cl2-l025     geneea         est $HYBRID $CL2 $L025
-    job basketball-selu-hybrid-est-l025     basketball     est $HYBRID $L025
+    job carcinogenesis-selu-hybrid-est-cl2-l05  carcinogenesis est $HYBRID $CL2 $L05
+    job ssb-selu-hybrid-est-cl4-l025            ssb            est $HYBRID $CL4 $L025
+    job airline-selu-hybrid-est-esp10           airline        est $HYBRID EARLY_STOPPING_PATIENCE=10
 else
-    job carcinogenesis-selu-hybrid-est-cl3  carcinogenesis est $HYBRID $CL3
-    job airline-selu-hybrid-est-l05         airline        est $HYBRID $L05
+    job carcinogenesis-selu-hybrid-est-cl2-l025 carcinogenesis est $HYBRID $CL2 $L025
+    job airline-selu-attention-est              airline        est $ATTN
+    job airline-selu-max-est                    airline        est $MAX
 fi
 
 if [[ -n "$START_AT" ]]; then
