@@ -155,14 +155,31 @@ RESUME_CARCINOGENESIS="PRETRAINED_MODEL_ARTIFACT_DIR=$M/${P}_carcinogenesis_$S P
 #   airline defaults with patience 10: the same settings as the team's run on the second server (push q50 1.31),
 #     whose only difference from ours (3.01, 3.80) is patience 10 vs 20. Replaces basketball cl2 + lambda 0.25,
 #     dropped because lambda 0.25 lowered basketball's pull-up (+6.0% -> -1.8%) just as cl2 did (-3.9%).
+#   Results: carcinogenesis cl2 + lambda 0.25 +3.3% / +2.2% (first run better on both), lambda 0.5 +6.0% / -1.7%;
+#   ssb cl4 + lambda 0.25 +5.2% / -17.8% (cl3 stays best); airline attention -183% / -38.6%, max -31.5% / +8.8%
+#   (push q50 1.80), patience 10 -42.6% / +14.0% (1.95). Patience is not the cause: the 11-19 defaults run had the
+#   same best epoch and val q50 (45, 1.403 vs 50, 1.403) and still gave 3.80.
+# 2026-11-26 lists (user): queue A keeps tuning the other DBs, queue B is dedicated to airline. One setting changed
+#   from a DB's best run.
+#   A: carcinogenesis cl3 + lambda 0.25 (lambda 0.25 is the only setting with pull-up above the baseline; cl3 gave
+#      the largest push-down gain at lambda 0.1); basketball lambda 0.15 (lambda 0.1 +2.0% / +6.0%, 0.25 +21.1% /
+#      -1.8%: in between); geneea cl2 + lambda 0.15 (cl2 lambda 0.1 +0.4% / +8.2%, 0.25 +2.9% / +2.4%: in between).
+#   B: airline. The baseline predicts its 0.5-1 s cluster without bias (ratio 0.94) and the augmented runs do not
+#      (0.25-0.31), so the loss is in the augmented model; these runs locate where:
+#      max + patience 10 (the two settings that avoided the collapse, combined; the best chance of a push-down
+#      q50 near the baseline's 1.37); hybrid with LeakyReLU (the baseline's activation: is SELU part of it?);
+#      hybrid with lambda 0 (no structure loss: lambda 0.5 made the collapse worse, 4.30 vs 3.80).
+L015="LAMBDA_STRUCT=0.15"
+L0="LAMBDA_STRUCT=0"
+LRELU="ACTIVATION_CLASS_NAME=LeakyReLU"
 if [[ "$JOB_LIST" == A ]]; then
-    job carcinogenesis-selu-hybrid-est-cl2-l05  carcinogenesis est $HYBRID $CL2 $L05
-    job ssb-selu-hybrid-est-cl4-l025            ssb            est $HYBRID $CL4 $L025
-    job airline-selu-hybrid-est-esp10           airline        est $HYBRID EARLY_STOPPING_PATIENCE=10
+    job carcinogenesis-selu-hybrid-est-cl3-l025 carcinogenesis est $HYBRID $CL3 $L025
+    job basketball-selu-hybrid-est-l015         basketball     est $HYBRID $L015
+    job geneea-selu-hybrid-est-cl2-l015         geneea         est $HYBRID $CL2 $L015
 else
-    job carcinogenesis-selu-hybrid-est-cl2-l025 carcinogenesis est $HYBRID $CL2 $L025
-    job airline-selu-attention-est              airline        est $ATTN
-    job airline-selu-max-est                    airline        est $MAX
+    job airline-selu-max-est-esp10              airline        est $MAX EARLY_STOPPING_PATIENCE=10
+    job airline-leakyrelu-hybrid-est            airline        est $HYBRID $LRELU
+    job airline-selu-hybrid-est-l0              airline        est $HYBRID $L0
 fi
 
 if [[ -n "$START_AT" ]]; then
